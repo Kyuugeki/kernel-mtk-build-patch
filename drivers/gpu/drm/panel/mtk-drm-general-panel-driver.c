@@ -1566,7 +1566,7 @@ static int lcm_get_panel_ext_param_from_dts(struct lcm *ctx)
 			//return -1;
 		}
 
-		//cmd_null_pkt_en
+/*		//cmd_null_pkt_en
 		ret = of_property_read_u32(ext_node,
 			EXT_PARAM_CMD_NULLPKT_EN_NODE_NAME, &read_value);
 		if (!ret) {
@@ -1588,7 +1588,7 @@ static int lcm_get_panel_ext_param_from_dts(struct lcm *ctx)
 		} else {
 			pr_info("cmd_null_pkt_len not set!\n");
 			//return -1;
-		}
+		} */
 
 		//set_area_before_trigger
 		ret = of_property_read_u32(ext_node,

@@ -473,8 +473,6 @@ struct mtk_panel_params {
 	unsigned int wait_sof_before_dec_vfp;
 	unsigned int doze_delay;
 	unsigned int lp_perline_en; //0: lp perframe 1: lp perline
-	unsigned int cmd_null_pkt_en;
-	unsigned int cmd_null_pkt_len;
 	unsigned int set_area_before_trigger;
 
 //Settings for LFR Function:
