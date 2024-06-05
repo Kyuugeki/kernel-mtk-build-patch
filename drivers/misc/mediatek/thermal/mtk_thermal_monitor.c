@@ -2187,6 +2187,7 @@ static int __init thermal_monitor_init(void)
 		mt6358tsbuck1_init();
 		mt6358tsbuck2_init();
 		mt6358tsbuck3_init();
+		vtskin_init();
 		mtktsbattery_init();
 		mtkts_bts_init();
 		mtkts_btsmdpa_init();
@@ -2227,6 +2228,7 @@ static void __exit thermal_monitor_exit(void)
 	mt6358tsbuck1_exit();
 	mt6358tsbuck2_exit();
 	mt6358tsbuck3_exit();
+	vtskin_exit();
 	mtktsbattery_exit();
 	mtkts_bts_exit();
 	mtkts_btsmdpa_exit();
