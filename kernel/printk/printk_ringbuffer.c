@@ -2062,7 +2062,10 @@ u64 prb_next_seq_id(struct printk_ringbuffer *rb, u64 old_seq)
 {
 	u64 seq = old_seq;
 
-	/* Search forward from the oldest descriptor. */
+	/*
+	 * The information about the last finalized @seq might be inaccurate.
+	 * Search forward to find the current one.
+	 */
 	while (_prb_read_valid(rb, &seq, NULL, NULL))
 		seq++;
 
