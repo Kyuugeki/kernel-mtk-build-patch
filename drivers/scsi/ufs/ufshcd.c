@@ -155,7 +155,6 @@ enum {
 	UFSHCD_EH_IN_PROGRESS = (1 << 0),
 };
 
-
 /* UFSHCD UIC layer error flags */
 enum {
 	UFSHCD_UIC_DL_PA_INIT_ERROR = (1 << 0), /* Data link layer error */
