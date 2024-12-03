@@ -22,6 +22,16 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    attributes:
+      label: Build fingerprint
+      description: Provide the fingerprint for the desired Build ID.
+      placeholder: |
+        🔍 You find it in the System Config.
+        It is long string that look like this: motorola/dubai_g/dubai:12/S1RD32.55-33/91483-c0e0a7:user/release-keys
+        It will not identify your device. It helps us locate exactly the sw version you want
+    validations:
+      required: true
 
   - type: textarea
     attributes:
