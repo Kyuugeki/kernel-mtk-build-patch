@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 5
 PATCHLEVEL = 10
-SUBLEVEL = 168
+SUBLEVEL = 209
 EXTRAVERSION =
 NAME = Dare mighty things
 
@@ -93,9 +93,16 @@ endif
 
 # If the user is running make -s (silent mode), suppress echoing of
 # commands
+# make-4.0 (and later) keep single letter options in the 1st word of MAKEFLAGS.
 
-ifneq ($(findstring s,$(filter-out --%,$(MAKEFLAGS))),)
-  quiet=silent_
+ifeq ($(filter 3.%,$(MAKE_VERSION)),)
+silence:=$(findstring s,$(firstword -$(MAKEFLAGS)))
+else
+silence:=$(findstring s,$(filter-out --%,$(MAKEFLAGS)))
+endif
+
+ifeq ($(silence),s)
+quiet=silent_
 endif
 
 export quiet Q KBUILD_VERBOSE
@@ -500,6 +507,10 @@ USERINCLUDE    := \
 		-I$(objtree)/include/generated/uapi \
                 -include $(srctree)/include/linux/kconfig.h
 
+# TN Begin modified by ruirui.cao/860552 20230809 CR/EKFOGO4G-1376
+USERINCLUDE    += -I$(srctree)/oem/devinfo/
+# TN End modified by ruirui.cao/860552 20230809 CR/EKFOGO4G-1376
+
 # Use LINUXINCLUDE when you must reference the include/ directory.
 # Needed to be compatible with the O= option
 LINUXINCLUDE    := \
@@ -671,6 +682,10 @@ drivers-y	:= drivers/ sound/
 drivers-$(CONFIG_SAMPLES) += samples/
 drivers-y	+= net/ virt/
 libs-y		:= lib/
+
+# TN Begin modified by ruirui.cao/860552 20230729 CR/EKFOGO4G-1376
+drivers-$(CONFIG_OEM_PROJECT)   += oem/
+# TN End modified by ruirui.cao/860552 20230729 CR/EKFOGO4G-1376
 endif # KBUILD_EXTMOD
 
 ifndef KBUILD_MIXED_TREE

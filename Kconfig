@@ -30,3 +30,7 @@ source "lib/Kconfig"
 source "lib/Kconfig.debug"
 
 source "Documentation/Kconfig"
+
+# TN Begin modified by ruirui.cao/860552 20230729 CR/EKFOGO4G-1376
+source "oem/Kconfig"
+# TN End modified by ruirui.cao/860552 20230729 CR/EKFOGO4G-1376
