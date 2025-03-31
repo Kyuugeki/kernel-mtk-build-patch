@@ -154,7 +154,6 @@ int vcu_dec_ipi_handler(void *data, unsigned int len, void *priv)
 	struct mtk_vcodec_dev *dev = (struct mtk_vcodec_dev *)priv;
 	struct vdec_inst *inst = NULL;
 	int msg_valid = 0;
-
 	BUILD_BUG_ON(sizeof(struct vdec_ap_ipi_cmd) > SHARE_BUF_SIZE);
 	BUILD_BUG_ON(sizeof(struct vdec_ap_ipi_init) > SHARE_BUF_SIZE);
 	BUILD_BUG_ON(sizeof(struct vdec_ap_ipi_dec_start) > SHARE_BUF_SIZE);
@@ -207,6 +206,10 @@ int vcu_dec_ipi_handler(void *data, unsigned int len, void *priv)
 		msg->msg_id, msg->status, vcu);
 
 	if (vcu->abort) {
+		return -EINVAL;
+	}
+
+	if (vcu->ctx == NULL) {
 		return -EINVAL;
 	}
 
@@ -269,11 +272,13 @@ int vcu_dec_ipi_handler(void *data, unsigned int len, void *priv)
 			ret = 1;
 			break;
 		case VCU_IPIMSG_DEC_LOCK_CORE:
-			vdec_decode_prepare(vcu->ctx, MTK_VDEC_CORE);
+			if (vcu->ctx->user_lock_hw)
+				vdec_decode_prepare(vcu->ctx, MTK_VDEC_CORE);
 			ret = 1;
 			break;
 		case VCU_IPIMSG_DEC_UNLOCK_CORE:
-			vdec_decode_unprepare(vcu->ctx, MTK_VDEC_CORE);
+			if (vcu->ctx->user_lock_hw)
+				vdec_decode_unprepare(vcu->ctx, MTK_VDEC_CORE);
 			ret = 1;
 			break;
 		case VCU_IPIMSG_DEC_GET_FRAME_BUFFER:
@@ -402,6 +407,8 @@ static int vcodec_vcu_send_msg(struct vdec_vcu_inst *vcu, void *msg, int len)
 	unsigned int suspend_block_cnt = 0;
 
 	mtk_vcodec_debug(vcu, "id=%X", *(uint32_t *)msg);
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	if (vcu->abort)
 		return -EIO;
 
@@ -451,7 +458,8 @@ static int vcodec_send_ap_ipi(struct vdec_vcu_inst *vcu, unsigned int msg_id)
 	int err = 0;
 
 	mtk_vcodec_debug(vcu, "+ id=%X", msg_id);
-
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_id = msg_id;
 	msg.ctx_id = vcu->ctx->id;
@@ -512,9 +520,10 @@ int vcu_dec_clear_ctx(struct vdec_vcu_inst *vcu)
 int vcu_dec_init(struct vdec_vcu_inst *vcu)
 {
 	struct vdec_ap_ipi_init msg;
-	int err;
-
+	int err=0;
 	mtk_vcodec_debug_enter(vcu);
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	vcu->signaled = 0;
 	vcu->failure = 0;
 	VCU_FPTR(vcu_get_ctx_ipi_binding_lock)(vcu->dev, &vcu->ctx_ipi_lock, VCU_VDEC);
@@ -556,7 +565,8 @@ int vcu_dec_start(struct vdec_vcu_inst *vcu,
 	int err = 0;
 
 	mtk_vcodec_debug_enter(vcu);
-
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_id = AP_IPIMSG_DEC_START;
 	msg.ctx_id = vcu->ctx->id;
@@ -598,6 +608,8 @@ int vcu_dec_reset(struct vdec_vcu_inst *vcu, enum vdec_reset_type drain_type)
 
 	mtk_vcodec_debug_enter(vcu);
 	mtk_vcodec_debug(vcu, "drain_type %d", drain_type);
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_id = AP_IPIMSG_DEC_RESET;
 	msg.ctx_id = vcu->ctx->id;
@@ -616,6 +628,8 @@ int vcu_dec_query_cap(struct vdec_vcu_inst *vcu, unsigned int id, void *out)
 	int err = 0;
 
 	mtk_vcodec_debug(vcu, "+ id=%X", AP_IPIMSG_DEC_QUERY_CAP);
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	vcu->dev = VCU_FPTR(vcu_get_plat_device)(vcu->ctx->dev->plat_dev);
 	if (vcu->dev  == NULL) {
 		mtk_vcodec_err(vcu, "vcu device in not ready");
@@ -652,7 +666,8 @@ int vcu_dec_set_param(struct vdec_vcu_inst *vcu, unsigned int id, void *param,
 	int i = 0;
 
 	mtk_vcodec_debug(vcu, "+ id=%X", AP_IPIMSG_DEC_SET_PARAM);
-
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_id = AP_IPIMSG_DEC_SET_PARAM;
 	msg.id = id;
@@ -678,9 +693,12 @@ int vcu_dec_set_frame_buffer(struct vdec_vcu_inst *vcu, void *fb)
 	struct vdec_ipi_fb ipi_fb;
 	struct vdec_fb *pfb = NULL;
 	bool dst_not_get = true;
+	long timeout_jiff;
+	int ret = 0;
 
 	mtk_vcodec_debug(vcu, "+ id=%X", AP_IPIMSG_DEC_FRAME_BUFFER);
-
+	if(vcu == NULL || vcu->ctx == NULL)
+		return -EINVAL;
 	memset(&msg, 0, sizeof(msg));
 	memset(&ipi_fb, 0, sizeof(ipi_fb));
 	msg.msg_id = AP_IPIMSG_DEC_FRAME_BUFFER;
@@ -693,6 +711,31 @@ int vcu_dec_set_frame_buffer(struct vdec_vcu_inst *vcu, void *fb)
 			mtk_vcodec_debug(vcu, "send flush");
 		} else {
 			pfb = mtk_vcodec_get_fb(vcu->ctx);
+			timeout_jiff = msecs_to_jiffies(1000);
+			/* 1s timeout */
+			while (pfb == NULL) {
+				ret = wait_event_interruptible_timeout(
+					vcu->ctx->fm_wq,
+					 v4l2_m2m_num_dst_bufs_ready(
+						 vcu->ctx->m2m_ctx) > 0 ||
+						 vcu->ctx->state == MTK_STATE_FLUSH,
+						 timeout_jiff);
+				pfb = mtk_vcodec_get_fb(vcu->ctx);
+				if (vcu->ctx->state == MTK_STATE_FLUSH)
+					mtk_vcodec_debug(vcu,
+						"get fm fail: state == FLUSH (pfb=0x%p)\n",
+						pfb);
+				else if (ret == 0)
+					mtk_vcodec_debug(vcu, "get fm fail: timeout (pfb=0x%p)\n",
+						pfb);
+				else if (pfb == NULL)
+					mtk_vcodec_debug(vcu, "get fm fail: unknown (ret = %d)\n",
+						ret);
+				if (vcu->ctx->state == MTK_STATE_FLUSH ||
+					ret != 0)
+					break;
+			}
+
 			if (pfb == &dst_buf_info->frame_buffer) {
 				dst_not_get = false;
 			}

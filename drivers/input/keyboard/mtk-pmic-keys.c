@@ -17,10 +17,37 @@
 #include <linux/mfd/mt6359p/registers.h>
 #include <linux/mfd/mt6363/registers.h>
 #include <linux/mfd/mt6397/registers.h>
+#include <linux/mfd/mt6358/core.h>
 #include <linux/mfd/mt6363/core.h>
 #include <linux/mfd/mt6366/core.h>
 #include <linux/mfd/mt6397/core.h>
+#include <linux/mfd/mt6357/registers.h>
+#include <linux/mfd/mt6357/core.h>
+#include <linux/notifier.h>
+#include <linux/time.h>
+#include <linux/timer.h>
+#include <linux/workqueue.h>
+#include <linux/wait.h>
+#include <linux/kthread.h>
 
+
+static DECLARE_WAIT_QUEUE_HEAD(chre_kthread_wait);
+static uint8_t chre_kthread_wait_condition;
+//static struct timer_list timer;
+struct device *dev_global;
+
+static u32 last_key_time = 0 ;
+/* 6358 pmic define */
+#define MT6358_TOPSTATUS			(0x28)
+#define MT6358_PSC_TOP_INT_CON0			(0x910)
+#define MT6358_TOP_RST_MISC			(0x14c)
+#define MT6358_PWRKEY_DEB_MASK			1
+#define MT6358_HOMEKEY_DEB_MASK			3
+#define MT6358_RG_INT_EN_HOMEKEY_MASK           1
+#define MT6358_RG_INT_EN_PWRKEY_MASK            0
+#define MT6358_PWRKEY_RST_SHIFT                 9
+#define MT6358_HOMEKEY_RST_SHIFT                8
+#define MT6358_RST_DU_SHIFT                     12
 
 #define MT6366_TOPSTATUS			(0x28)
 #define MT6366_PSC_TOP_INT_CON0			(0x910)
@@ -53,7 +80,9 @@
 #define RST_PWRKEY_HOME2_MODE			2
 #define RST_PWRKEY_HOME_HOME2_MODE		3
 #define INVALID_VALUE				0
-
+#define MT6357_PWRKEY_RST_SHIFT			9
+#define MT6357_HOMEKEY_RST_SHIFT		8
+#define MT6357_RST_DU_SHIFT			12
 struct mtk_pmic_keys_regs {
 	u32 deb_reg;
 	u32 deb_mask;
@@ -156,6 +185,42 @@ static const struct mtk_pmic_regs mt6366_regs = {
 	.rst_du_shift = MT6366_RST_DU_SHIFT,
 };
 
+static const struct mtk_pmic_regs mt6357_regs = {
+	.keys_regs[MTK_PMIC_PWRKEY_INDEX] =
+		MTK_PMIC_KEYS_REGS(MT6357_TOPSTATUS,
+		MT6357_PWRKEY_DEB_MASK,
+		MT6357_PSC_TOP_INT_CON0,
+		MT6357_RG_INT_EN_PWRKEY_MASK),
+	.keys_regs[MTK_PMIC_HOMEKEY_INDEX] =
+		MTK_PMIC_KEYS_REGS(MT6357_TOPSTATUS,
+		MT6357_HOMEKEY_DEB_MASK,
+		MT6357_PSC_TOP_INT_CON0,
+		MT6357_RG_INT_EN_HOMEKEY_MASK),
+	.release_irq = true,
+	.pmic_rst_reg = MT6357_TOP_RST_MISC,
+	.pwrkey_rst_shift = MT6357_PWRKEY_RST_SHIFT,
+	.homekey_rst_shift = MT6357_HOMEKEY_RST_SHIFT,
+	.rst_du_shift = MT6357_RST_DU_SHIFT,
+};
+
+static const struct mtk_pmic_regs mt6358_regs = {
+	.keys_regs[MTK_PMIC_PWRKEY_INDEX] =
+		MTK_PMIC_KEYS_REGS(MT6358_TOPSTATUS,
+		MT6358_PWRKEY_DEB_MASK,
+		MT6358_PSC_TOP_INT_CON0,
+		MT6358_RG_INT_EN_PWRKEY_MASK),
+	.keys_regs[MTK_PMIC_HOMEKEY_INDEX] =
+		MTK_PMIC_KEYS_REGS(MT6358_TOPSTATUS,
+		MT6358_HOMEKEY_DEB_MASK,
+		MT6358_PSC_TOP_INT_CON0,
+		MT6358_RG_INT_EN_HOMEKEY_MASK),
+	.release_irq = true,
+	.pmic_rst_reg = MT6358_TOP_RST_MISC,
+	.pwrkey_rst_shift = MT6358_PWRKEY_RST_SHIFT,
+	.homekey_rst_shift = MT6358_HOMEKEY_RST_SHIFT,
+	.rst_du_shift = MT6358_RST_DU_SHIFT,
+};
+
 struct mtk_pmic_keys_info {
 	struct mtk_pmic_keys *keys;
 	const struct mtk_pmic_keys_regs *regs;
@@ -177,6 +242,70 @@ enum mtk_pmic_keys_lp_mode {
 	LP_ONEKEY,
 	LP_TWOKEY,
 };
+
+
+#define PSENSOR_CALI_EVENT 0x63616c69
+
+static RAW_NOTIFIER_HEAD(psensor_notify_list);
+
+static int call_psensor_notifiers(unsigned long val, void *v)
+{
+	return raw_notifier_call_chain(&psensor_notify_list, val, v);
+}
+
+int register_psensor_notifier(struct notifier_block *nb)
+{
+	int err;
+	err = raw_notifier_chain_register(&psensor_notify_list, nb);
+
+	if(err)
+		goto out;
+
+out:
+	return err;
+}
+EXPORT_SYMBOL(register_psensor_notifier);
+
+int unregister_psensor_notifier(struct notifier_block *nb)
+{
+	int err;
+	err = raw_notifier_chain_unregister(&psensor_notify_list, nb);
+
+	if(err)
+		goto out;
+
+out:
+	return err;
+}
+EXPORT_SYMBOL(unregister_psensor_notifier);
+
+static void check_double_key(struct device * dev)
+{
+    u32 current_time = jiffies_to_msecs(jiffies);
+	dev_info(dev, "(%s) enter\n",__func__);
+    if (current_time - last_key_time <= 300) {
+	    	dev_info(dev, "(%s) double current time =%ld  last time =%ld\n",__func__, current_time,last_key_time);
+		call_psensor_notifiers(PSENSOR_CALI_EVENT, NULL);
+    }
+    last_key_time = current_time;
+}
+
+static int powerkey_irq_event(void *data)
+{
+	for (;;) {
+		int ret = 0;
+		dev_info(dev_global, "[zbt]powerkey_irq_event enter\n");
+		ret = wait_event_interruptible(chre_kthread_wait,
+			READ_ONCE(chre_kthread_wait_condition));
+		if (ret != 0)
+			continue;
+		check_double_key(dev_global);
+		dev_info(dev_global, "[zbt]powerkey_irq_event enter1111111\n");
+		WRITE_ONCE(chre_kthread_wait_condition, false);
+		
+	}
+	return 0;
+}
 
 static void mtk_pmic_keys_lp_reset_setup(struct mtk_pmic_keys *keys,
 		const struct mtk_pmic_regs *pmic_regs)
@@ -239,11 +368,42 @@ static void mtk_pmic_keys_lp_reset_setup(struct mtk_pmic_keys *keys,
 	}
 }
 
+#if 0
+static void check_double_key(struct device * dev)
+{
+    u32 current_time = jiffies_to_msecs(jiffies);
+	dev_info(dev, "(%s) enter\n",__func__);
+    if (current_time - last_key_time <= 300) {
+	    	dev_info(dev, "(%s) double current time =%ld  last time =%ld\n",__func__, current_time,last_key_time);
+		call_psensor_notifiers(PSENSOR_CALI_EVENT, NULL);
+    }
+    last_key_time = current_time;
+}
+
+
+void double_key_irq(struct timer_list* timer)
+{
+    //struct mtk_pmic_keys_info *info = data;
+    //struct input_event event;
+	u32 m_sec = 0;
+     //check_double_key(info, &event);
+    //return IRQ_HANDLED;
+    	dev_info(dev_global, "(%s) jiffies =%ld \n",
+		 __func__, jiffies);
+	m_sec = jiffies_to_msecs(jiffies);
+	dev_info(dev_global, "(%s) msec =%ld \n",
+		 __func__, m_sec);
+	if(key_flag == true) {
+	check_double_key(dev_global);
+	}
+     mod_timer(timer, jiffies + msecs_to_jiffies(200));
+}
+#endif
 static irqreturn_t mtk_pmic_keys_release_irq_handler_thread(
 				int irq, void *data)
 {
 	struct mtk_pmic_keys_info *info = data;
-
+	//key_flag = false; 
 	input_report_key(info->keys->input_dev, info->keycode, 0);
 	input_sync(info->keys->input_dev);
 	if (info->suspend_lock)
@@ -257,7 +417,7 @@ static irqreturn_t mtk_pmic_keys_irq_handler_thread(int irq, void *data)
 {
 	struct mtk_pmic_keys_info *info = data;
 	u32 key_deb, pressed;
-
+	
 	if (info->release_irq_num > 0) {
 		pressed = 1;
 	} else {
@@ -268,7 +428,8 @@ static irqreturn_t mtk_pmic_keys_irq_handler_thread(int irq, void *data)
 
 	input_report_key(info->keys->input_dev, info->keycode, pressed);
 	input_sync(info->keys->input_dev);
-
+	WRITE_ONCE(chre_kthread_wait_condition, true);
+	wake_up(&chre_kthread_wait);
 	if (pressed && info->suspend_lock)
 		__pm_stay_awake(info->suspend_lock);
 	else if (info->suspend_lock)
@@ -365,6 +526,12 @@ static const struct of_device_id of_mtk_pmic_keys_match_tbl[] = {
 		.compatible = "mediatek,mt6366-keys",
 		.data = &mt6366_regs,
 	}, {
+		.compatible = "mediatek,mt6358-keys",
+		.data = &mt6358_regs,
+	}, {
+		.compatible = "mediatek,mt6357-keys",
+		.data = &mt6357_regs,
+	}, {
 		/* sentinel */
 	}
 };
@@ -374,6 +541,7 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 {
 	int error, index = 0;
 	unsigned int keycount;
+	struct task_struct *task = NULL;
 	struct mt6397_chip *pmic_chip;
 	struct device_node *node = pdev->dev.of_node, *child;
 	struct mtk_pmic_keys *keys;
@@ -398,6 +566,7 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 	}
 
 	keys->dev = &pdev->dev;
+	dev_global = keys->dev;
 	mtk_pmic_regs = of_id->data;
 
 	keys->input_dev = input_dev = devm_input_allocate_device(keys->dev);
@@ -462,7 +631,12 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 			"register input device failed (%d)\n", error);
 		return error;
 	}
-
+	//zbt modify code 
+	task = kthread_run(powerkey_irq_event, NULL, "ps_cali");
+	if (IS_ERR(task)) {
+		pr_err("SCP_sensorHub_direct_push_work create fail!\n");
+		return -1;
+	}
 	mtk_pmic_keys_lp_reset_setup(keys, mtk_pmic_regs);
 
 	platform_set_drvdata(pdev, keys);

@@ -61,19 +61,12 @@
 #include <linux/of_platform.h>
 
 #include "mtk_charger.h"
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-#include "sgm415xx.h"
-#endif
+
 int get_uisoc(struct mtk_charger *info)
 {
 	union power_supply_propval prop;
 	struct power_supply *bat_psy = NULL;
 	int ret;
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 
 	bat_psy = info->bat_psy;
 
@@ -82,7 +75,7 @@ int get_uisoc(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 50;
@@ -96,7 +89,6 @@ int get_uisoc(struct mtk_charger *info)
 		ret);
 	return ret;
 }
-EXPORT_SYMBOL(get_uisoc);
 
 int get_battery_voltage(struct mtk_charger *info)
 {
@@ -104,10 +96,6 @@ int get_battery_voltage(struct mtk_charger *info)
 	struct power_supply *bat_psy = NULL;
 	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -115,7 +103,6 @@ int get_battery_voltage(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
@@ -133,15 +120,15 @@ int get_battery_voltage(struct mtk_charger *info)
 
 int get_battery_temperature(struct mtk_charger *info)
 {
+/*TN Begin modified by hao.jia/809321 20231103 CR/EKFOGO4G-1548*/
+#ifdef CONFIG_NO_THERMAL_BUILD
+	int ret = 25; // fixed temp at 25C
+#else
 	union power_supply_propval prop;
 	struct power_supply *bat_psy = NULL;
 	int ret = 0;
 	int tmp_ret = 0;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -149,7 +136,7 @@ int get_battery_temperature(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 27;
@@ -158,7 +145,8 @@ int get_battery_temperature(struct mtk_charger *info)
 			POWER_SUPPLY_PROP_TEMP, &prop);
 		ret = prop.intval / 10;
 	}
-
+#endif
+/*TN End modified by hao.jia/809321 20231103 CR/EKFOGO4G-1548*/
 	chr_debug("%s:%d\n", __func__,
 		ret);
 	return ret;
@@ -171,10 +159,6 @@ int get_battery_current(struct mtk_charger *info)
 	int ret = 0;
 	int tmp_ret = 0;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -182,7 +166,7 @@ int get_battery_current(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 0;
@@ -203,13 +187,18 @@ static int get_pmic_vbus(struct mtk_charger *info, int *vchr)
 	static struct power_supply *chg_psy;
 	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (chg_psy == NULL)
-		chg_psy = power_supply_get_by_name("usb_vbus");
+	/*TN Begin modified by zelin.pan/860620 2023828 CR/EKFOGO4G-1643*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+	if (chg_psy == NULL) {
+		chg_psy = power_supply_get_by_name("ext_charger_type");
+		if (IS_ERR_OR_NULL(chg_psy)) {
+			chr_err("%s get ext_charger_type chg psy failed\n", __func__);
+		}
+	}
 #else
-	if (chg_psy == NULL)
-		chg_psy = power_supply_get_by_name("mtk_charger_type");
+	chg_psy = power_supply_get_by_name("mtk_charger_type");
 #endif
+	/*TN Begin modified by zelin.pan/809321 2023828 CR/EKFOGO4G-1643*/
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s Couldn't get chg_psy\n", __func__);
 		ret = -1;
@@ -217,7 +206,6 @@ static int get_pmic_vbus(struct mtk_charger *info, int *vchr)
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_VOLTAGE_NOW, &prop);
 	}
-
 	*vchr = prop.intval;
 
 	chr_debug("%s vbus:%d\n", __func__,
@@ -242,7 +230,6 @@ int get_vbus(struct mtk_charger *info)
 
 	return vchr;
 }
-EXPORT_SYMBOL(get_vbus);
 
 int get_ibat(struct mtk_charger *info)
 {
@@ -279,10 +266,6 @@ bool is_battery_exist(struct mtk_charger *info)
 	int ret = 0;
 	int tmp_ret = 0;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	if (bat_psy == NULL || IS_ERR(bat_psy))
-		bat_psy = power_supply_get_by_name("battery");
-#else
 	bat_psy = info->bat_psy;
 
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
@@ -290,7 +273,7 @@ bool is_battery_exist(struct mtk_charger *info)
 		bat_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "gauge");
 		info->bat_psy = bat_psy;
 	}
-#endif
+
 	if (bat_psy == NULL || IS_ERR(bat_psy)) {
 		chr_err("%s Couldn't get bat_psy\n", __func__);
 		ret = 1;
@@ -307,46 +290,38 @@ bool is_battery_exist(struct mtk_charger *info)
 
 bool is_charger_exist(struct mtk_charger *info)
 {
-	union power_supply_propval prop,wlc_prop;
-	static struct power_supply *chg_psy, *wl_psy;
-	int ret = 0;
+	union power_supply_propval prop;
+	static struct power_supply *chg_psy;
+	int ret;
 	int tmp_ret = 0;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	chg_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
 	chg_psy = info->chg_psy;
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		chr_err("%s Couldn't get chg_psy\n", __func__);
-
-
 		chr_err("%s retry to get chg_psy\n", __func__);
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+		chg_psy = power_supply_get_by_name("ext_charger_type");
+		if (IS_ERR_OR_NULL(chg_psy)) {
+			chr_err("%s get ext_charger_type chg psy failed\n", __func__);
+		}
+#else
 		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
 		info->chg_psy = chg_psy;
 	}
-#endif
+
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		pr_notice("%s Couldn't get chg_psy\n", __func__);
-		prop.intval = 0;
+		ret = -1;
 	} else {
 		tmp_ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ONLINE, &prop);
 		ret = prop.intval;
-		if (ret)
-			return ret;
 	}
 
-	wl_psy = power_supply_get_by_name("wireless");
-	if (wl_psy == NULL || IS_ERR(wl_psy)) {
-		chr_err("%s Couldn't get wl_psy\n", __func__);
-		wlc_prop.intval = 0;
-	} else {
-		ret = power_supply_get_property(wl_psy,
-			POWER_SUPPLY_PROP_ONLINE, &wlc_prop);
-		ret = wlc_prop.intval;
-	}
-	chr_err("%s:%d\n", __func__,
+	chr_debug("%s:%d\n", __func__,
 		ret);
 	return ret;
 }
@@ -356,41 +331,25 @@ int get_charger_type(struct mtk_charger *info)
 	union power_supply_propval prop = {0};
 	union power_supply_propval prop2 = {0};
 	union power_supply_propval prop3 = {0};
-	union power_supply_propval prop_wls;
-	static struct power_supply *wl_psy;
 	static struct power_supply *chg_psy;
 	int ret;
-	if (info->wireless_online) {
-		if (wl_psy == NULL || IS_ERR(wl_psy)) {
-			chr_err("%s retry to get wl_psy\n", __func__);
-			wl_psy = power_supply_get_by_name("wireless");
-		}
-		if (wl_psy == NULL || IS_ERR(wl_psy)) {
-			chr_err("%s Couldn't get wl_psy\n", __func__);
-			prop_wls.intval = POWER_SUPPLY_TYPE_UNKNOWN;
-		} else {
-			ret = power_supply_get_property(wl_psy,
-			POWER_SUPPLY_PROP_TYPE, &prop_wls);
-			chr_err("%s type:%d ret:%d\n", __func__, prop_wls.intval,ret);
-			if (POWER_SUPPLY_TYPE_WIRELESS == prop_wls.intval) {
-				chr_err("%s event, wireless online,type:%d\n", __func__, prop_wls.intval);
-			} else {
-				prop_wls.intval = POWER_SUPPLY_TYPE_UNKNOWN;
-			}
-		}
-	}
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	chg_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
 	chg_psy = info->chg_psy;
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s retry to get chg_psy\n", __func__);
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+		chg_psy = power_supply_get_by_name("ext_charger_type");
+		if (IS_ERR_OR_NULL(chg_psy)) {
+			chr_err("%s get ext_charger_type chg psy failed\n", __func__);
+		}
+#else
 		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
 		info->chg_psy = chg_psy;
 	}
-#endif
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s Couldn't get chg_psy\n", __func__);
@@ -410,19 +369,12 @@ int get_charger_type(struct mtk_charger *info)
 			prop2.intval = POWER_SUPPLY_TYPE_UNKNOWN;
 	}
 
-	chr_err("%s online:%d type:%d usb_type:%d\n", __func__,
+	chr_debug("%s online:%d type:%d usb_type:%d\n", __func__,
 		prop.intval,
 		prop2.intval,
 		prop3.intval);
 
-	if((info->mmi.factory_mode == true) && info->wireless_online && (POWER_SUPPLY_TYPE_UNKNOWN != prop_wls.intval))
-		return prop_wls.intval;
-	if(POWER_SUPPLY_TYPE_UNKNOWN != prop2.intval)
-		return prop2.intval;
-	else if(POWER_SUPPLY_TYPE_UNKNOWN != prop_wls.intval)
-		return prop_wls.intval;
-	else
-		return POWER_SUPPLY_TYPE_UNKNOWN;
+	return prop2.intval;
 }
 
 int get_usb_type(struct mtk_charger *info)
@@ -432,29 +384,32 @@ int get_usb_type(struct mtk_charger *info)
 	static struct power_supply *chg_psy;
 	int ret;
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	chg_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
 	chg_psy = info->chg_psy;
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s retry to get chg_psy\n", __func__);
-		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev,
-						       "charger");
+/*TN Begin modified by zelin.pan/860620 2023828 CR/EKFOGO4G-1643*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+		chg_psy = power_supply_get_by_name("ext_charger_type");
+		if (IS_ERR_OR_NULL(chg_psy)) {
+			chr_err("%s get ext_charger_type chg psy failed\n", __func__);
+		}
+#else
+		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
+#endif
+/*TN End modified by zelin.pan/860620 2023828 CR/EKFOGO4G-1643*/
+
 		info->chg_psy = chg_psy;
 	}
-#endif
-
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s Couldn't get chg_psy\n", __func__);
 	} else {
-
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ONLINE, &prop);
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_USB_TYPE, &prop2);
 	}
-	chr_err("%s online:%d usb_type:%d\n", __func__,
+	chr_debug("%s online:%d usb_type:%d\n", __func__,
 		prop.intval,
 		prop2.intval);
 	return prop2.intval;

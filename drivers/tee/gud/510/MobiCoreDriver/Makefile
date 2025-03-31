@@ -44,9 +44,6 @@ mcDrvModule-y := \
 	xen_common.o \
 	xen_fe.o
 
-# Support HW wrapped key mode for FBE.
-mcDrvModule-$(CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT) += hwkm.o
-
 # Release mode by default
 ccflags-y += -DNDEBUG
 ccflags-y += -Wno-declaration-after-statement
@@ -59,3 +56,5 @@ KBUILD_CFLAGS += -I${VLM_VDRIVERS}/drivers/vlx
 
 # MobiCore Driver includes
 ccflags-y += -I$(GUD_ROOT_FOLDER)/MobiCoreDriver
+
+include $(srctree)/drivers/tee/gpapi/Makefile.impl.include

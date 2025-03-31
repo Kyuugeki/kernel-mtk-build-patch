@@ -669,7 +669,6 @@
 #define USB_SID_DISPLAYPORT	0xff01	/* display port */
 #define USB_VID_RICHTEK		0x29cf  /* demo uvdm */
 #define USB_VID_DIRECTCHARGE	0x29cf  /* direct charge */
-#define USB_VID_MMI_ADAPTER  	0x22b8
 
 /* PD counter definitions */
 #define PD_MESSAGE_ID_COUNT	7
@@ -737,6 +736,9 @@ struct pe_data {		/* reset after detached */
 	bool reset_vdm_state;
 	bool power_cable_present;
 	bool during_swap;	/* pr or dr swap */
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	int retry_cnt;
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 
 #if CONFIG_USB_PD_REV30
 	bool cable_rev_discovered;
@@ -852,14 +854,16 @@ struct pd_country_authority {
 struct pd_port {
 	struct tcpc_device *tcpc;
 	struct mutex pd_lock;
-
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	/* miss msg */
+	bool miss_msg;
+	uint8_t rx_cap;
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 	/* PD */
 	bool msg_output_lock;
 
 	uint8_t state_machine;
 	uint8_t pd_connect_state;
-
-	uint8_t pd_vdm_verify_state;
 
 	uint8_t pe_pd_state;
 	uint8_t pe_vdm_state;
@@ -1039,10 +1043,6 @@ struct pd_port {
 #if IS_ENABLED(CONFIG_WAIT_TX_RETRY_DONE)
 	struct completion tx_done;
 #endif /* CONFIG_WAIT_TX_RETRY_DONE */
-
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-	uint8_t mmi_adapter_state;
-#endif /* CONFIG_SUPPORT_MMI_ADAPTER */
 };
 
 #if CONFIG_USB_PD_ALT_MODE
@@ -1233,7 +1233,6 @@ void pd_lock_msg_output(struct pd_port *pd_port);
 void pd_unlock_msg_output(struct pd_port *pd_port);
 
 int pd_update_connect_state(struct pd_port *pd_port, uint8_t state);
-int pd_update_vdm_verify_state(struct pd_port *pd_port, uint8_t state);
 
 /* ---- PD notify TCPC Policy Engine State Changed ---- */
 
@@ -1625,6 +1624,11 @@ enum {	/* pd_traffic_control */
 
 #define PD30_SINK_TX_OK		TYPEC_CC_RP_3_0
 #define PD30_SINK_TX_NG		TYPEC_CC_RP_1_5
+
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+void pd_add_miss_msg(struct pd_port *pd_port,struct pd_event *pd_event,
+				uint8_t msg);
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 
 void pd_set_sink_tx(struct pd_port *pd_port, uint8_t cc);
 void pd_sync_sop_spec_revision(struct pd_port *pd_port);

@@ -305,11 +305,13 @@
 /* Qmax for battery  */
 int g_Q_MAX[MAX_TABLE][TOTAL_BATTERY_NUMBER] = {
 	/*bat1,   bat2,   bat3,    bat4*/
-	{ 2946, 2712, 2490, 1965},/*T0*/
-	{ 2796, 2851, 2468, 1984},/*T1*/
-	{ 2718, 2432, 2310, 1946},/*T2*/
-	{ 2535, 1991, 1858, 1873},/*T3*/
-	{ 2523, 1960, 1843, 1851},/*T4*/
+	/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+	{ 4991, 5043, 5948, 6074},/*T0*/
+	{ 4980, 5049, 6010, 6074},/*T1*/
+	{ 5025, 5049, 6010, 5997},/*T2*/
+	{ 4928, 4917, 5925, 5866},/*T3*/
+	{ 4782, 4815, 5744, 5732},/*T4*/
+	/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
 	{ 2211, 1652, 1533, 1541},/*T5*/
 	{ 2201, 1642, 1523, 1531},/*T6*/
 	{ 2191, 1632, 1513, 1521},/*T7*/
@@ -319,11 +321,13 @@ int g_Q_MAX[MAX_TABLE][TOTAL_BATTERY_NUMBER] = {
 
 int g_Q_MAX_H_CURRENT[MAX_TABLE][TOTAL_BATTERY_NUMBER] = {
 	/*bat1,   bat2,   bat3,    bat4*/
-	{ 2646, 2412, 2190, 1665},/*T0*/
-	{ 2496, 2551, 2168, 1684},/*T1*/
-	{ 2418, 2132, 2010, 1646},/*T2*/
-	{ 2235, 1691, 1558, 1573},/*T3*/
-	{ 2223, 1660, 1543, 1551},/*T4*/
+	/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+	{ 4991, 5043, 5948, 6074},/*T0*/
+	{ 4980, 5049, 6010, 6075},/*T1*/
+	{ 5025, 5049, 6010, 5997},/*T2*/
+	{ 4928, 4917, 5925, 5866},/*T3*/
+	{ 4782, 4815, 5744, 5732},/*T4*/
+	/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
 	{ 2210, 1650, 1533, 1541},/*T5*/
 	{ 2200, 1640, 1523, 1531},/*T6*/
 	{ 2190, 1630, 1513, 1521},/*T7*/
@@ -354,11 +358,13 @@ int g_FG_PSEUDO1[MAX_TABLE][TOTAL_BATTERY_NUMBER] = {
 
 int g_FG_PSEUDO100[MAX_TABLE][TOTAL_BATTERY_NUMBER] = {
 	/*bat1,   bat2,   bat3,    bat4*/
-	{ 100, 100, 100, 100},/*T0*/
-	{ 100, 100, 100, 100},/*T1*/
-	{ 100, 100, 100, 100},/*T2*/
-	{ 100, 100, 100, 100},/*T3*/
-	{ 100, 100, 100, 100},/*T4*/
+	/*TN Begin modified by zelin.pan/860620 20230829 CR/EKFOGO4G-89*/
+	{ 97, 97, 97, 97},/*T0*/
+	{ 97, 97, 97, 97},/*T1*/
+	{ 97, 97, 97, 97},/*T2*/
+	{ 97, 97, 97, 97},/*T3*/
+	{ 97, 97, 97, 97},/*T4*/
+	/*TN End modified by zelin.pan/860620 20230829 CR/EKFOGO4G-89*/
 	{ 100, 100, 100, 100},/*T5*/
 	{ 100, 100, 100, 100},/*T6*/
 	{ 100, 100, 100, 100},/*T7*/
@@ -458,41 +464,13 @@ int g_temperature[MAX_TABLE] = {
 #define RBAT_PULL_UP_R             61900
 #endif
 
-#ifdef CONFIG_CANCUNF_BATTERY_NTC
-#define RBAT_PULL_UP_VOLT          1840
-#else
 #define RBAT_PULL_UP_VOLT          2800
-#endif
 
 #define BIF_NTC_R 16000
 
 #if (BAT_NTC_10 == 1)
-struct fg_temp fg_temp_table[23] = {
-#ifdef CONFIG_CANCUNF_BATTERY_NTC
-		{-40, 202700},
-		{-35, 153000},
-		{-30, 116670},
-		{-25, 89849},
-		{-20, 69814},
-		{-15, 54733},
-		{-10, 43245},
-		{-5, 34388},
-		{0,  27545},
-		{5,  22229},
-		{10, 18050},
-		{15, 14741},
-		{20, 12108},
-		{25, 10000},
-		{30, 8307},
-		{35, 6942},
-		{40, 5828},
-		{45, 4912},
-		{50, 4159},
-		{55, 3531},
-		{60, 3010},
-		{65, 2582},
-		{70, 2223}
-#else
+/*TN Begin modified by zelin.pan/860620 20231008 CR/EKFOGO4G-1548*/
+struct fg_temp fg_temp_table[25] = {
 		{-40, 195652},
 		{-35, 148171},
 		{-30, 113347},
@@ -514,10 +492,12 @@ struct fg_temp fg_temp_table[23] = {
 		{50, 4161},
 		{55, 3535},
 		{60, 3014},
-		{65, 2588},
-		{70, 2227}
-#endif
+		{65, 2586},
+		{70, 2228},
+		{75, 1925},
+		{80, 1669}
 };
+/*TN End modified by zelin.pan/860620 20231008 CR/EKFOGO4G-1548*/
 #endif
 
 #if (BAT_NTC_47 == 1)
@@ -546,37 +526,7 @@ struct fg_temp fg_temp_table[21] = {
 };
 #endif
 
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-struct typec_vol_temp {
-	int vol;
-	int temp;
-};
 
-struct typec_vol_temp typec_table[17] = {
-		{1743121, 700},
-		{1706500, 800},
-		{1652861, 900},
-		{1578549, 1000},
-		{1481344, 1100},
-		{1361798, 1200},
-		{1224590, 1300},
-		{1076289, 1400},
-		{925778, 1500},
-		{782609, 1600},
-		{651064, 1700},
-		{537410, 1800},
-		{439535, 1900},
-		{358522, 2000},
-		{293562, 2100},
-		{240000, 2200},
-		{215350, 2250}
-
-};
-#define typec_tab_len 17
-#define otp_threshold 750
-#define recover_threshold 650
-#define otpv_threshold 4000
-#endif
 
 /* ============================================================
  * <DOD, Battery_Voltage> Table

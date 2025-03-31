@@ -30,7 +30,7 @@
 #include <linux/mfd/mt6358/core.h>
 #include "mt6358-accdet.h"
 #include "mt6358.h"
-
+#include <linux/notifier.h>
 /* grobal variable definitions */
 #define REGISTER_VAL(x)	(x - 1)
 #define HAS_CAP(_c, _x)	(((_c) & (_x)) == (_x))
@@ -182,6 +182,45 @@ static u32 get_triggered_eint(void);
 static void send_status_event(u32 cable_type, u32 status);
 static inline void accdet_eint_high_level_support(void);
 /* global function declaration */
+
+#define SAR_CALI_EVENT 0x63616c87
+
+static RAW_NOTIFIER_HEAD(sar_notify_list);
+
+static int call_sar_notifiers(unsigned long val, void *v)
+{
+	return raw_notifier_call_chain(&sar_notify_list, val, v);
+}
+
+static int register_sar_notifier(struct notifier_block *nb)
+{
+	int err;
+	pr_info("register_sar_notifier\n");
+	err = raw_notifier_chain_register(&sar_notify_list, nb);
+
+	if(err)
+		goto out;
+
+out:
+	return err;
+}
+EXPORT_SYMBOL(register_sar_notifier);
+
+static int unregister_sar_notifier(struct notifier_block *nb)
+{
+	int err;
+	pr_info("unregister_sar_notifier\n");
+	err = raw_notifier_chain_unregister(&sar_notify_list, nb);
+
+	if(err)
+		goto out;
+
+out:
+	return err;
+}
+EXPORT_SYMBOL(unregister_sar_notifier);
+
+
 inline u32 accdet_read(u32 addr)
 {
 	u32 val = 0;
@@ -808,6 +847,10 @@ static void send_status_event(u32 cable_type, u32 status)
 {
 	int report = 0;
 
+// TN Begin modified by qinghua.zeng/860624 20231101 CR/EKFOGO4G-5073
+	pr_notice("%s accdet :(%p)\n", __func__, accdet);
+// TN End modified by qinghua.zeng/860624 20231101 CR/EKFOGO4G-5073
+
 	switch (cable_type) {
 	case HEADSET_NO_MIC:
 		if (status)
@@ -845,6 +888,7 @@ static void send_status_event(u32 cable_type, u32 status)
 
 		snd_soc_jack_report(&accdet->jack, report,
 				SND_JACK_MICROPHONE);
+		call_sar_notifiers(SAR_CALI_EVENT ,NULL);
 		pr_info("accdet MICROPHONE(4-pole) %s\n",
 			status ? "PlugIn" : "PlugOut");
 		/* when press key for a long time then plug in
@@ -1058,7 +1102,23 @@ static inline void disable_accdet(void)
 
 static inline void headset_plug_out(void)
 {
+// TN Begin modified by qinghua.zeng/860624 20231025 CR/EKFOGO4G-2887
+#ifdef CONFIG_FACTORY_BUILD
+	if (accdet->cable_type == LINE_OUT_DEVICE) {
+		send_status_event(LINE_OUT_DEVICE, 0);
+		pr_info("accdet %s, LINE_OUT_DEVICE\n", __func__);
+	} else if (accdet->cable_type == HEADSET_NO_MIC) {
+		send_status_event(HEADSET_NO_MIC, 0);
+		pr_info("accdet %s, HEADSET_NO_MIC\n", __func__);
+	} else {
+		send_status_event(HEADSET_MIC, 0);
+		pr_info("accdet %s, HEADSET_MIC\n", __func__);
+	}
+#else
 	send_status_event(accdet->cable_type, 0);
+#endif
+// TN End modified by qinghua.zeng/860624 20231025 CR/EKFOGO4G-2887
+
 	accdet->accdet_status = PLUG_OUT;
 	accdet->cable_type = NO_DEVICE;
 
@@ -1331,6 +1391,10 @@ static inline void check_cable_type(void)
 static void accdet_work_callback(struct work_struct *work)
 {
 	u32 pre_cable_type = accdet->cable_type;
+
+// TN Begin modified by qinghua.zeng/860624 20231101 CR/EKFOGO4G-5073
+	pr_notice("%s accdet :(%p)\n", __func__, accdet);
+// TN End modified by qinghua.zeng/860624 20231101 CR/EKFOGO4G-5073
 
 	__pm_stay_awake(accdet->wake_lock);
 	check_cable_type();
@@ -1672,7 +1736,7 @@ static int accdet_get_dts_data(void)
 {
 	int ret = 0;
 	struct device_node *node = NULL;
-	int pwm_deb[8] = {0};
+	int pwm_deb[15] = {0};
 	int three_key[4] = {0};
 	u32 tmp = 0;
 
@@ -1714,11 +1778,11 @@ static int accdet_get_dts_data(void)
 			&accdet_dts.eint_pol);
 	if (ret)
 		accdet_dts.eint_pol = 8;
-
-	pr_info("accdet mic_vol=%d, plugout_deb=%d mic_mode=%d eint_pol=%d\n",
+// TN Begin modified by qinghua.zeng/860624 20230913 CR/EKFOGO4G-1985
+	/*pr_info("accdet mic_vol=%d, plugout_deb=%d mic_mode=%d eint_pol=%d\n",
 	     accdet_dts.mic_vol, accdet_dts.plugout_deb,
-	     accdet_dts.mic_mode, accdet_dts.eint_pol);
-
+	     accdet_dts.mic_mode, accdet_dts.eint_pol);*/
+// TN End modified by qinghua.zeng/860624 20230913 CR/EKFOGO4G-1985
 	ret = of_property_read_u32(node,
 			"headset-use-ap-eint", &tmp);
 	if (ret)
@@ -1758,8 +1822,9 @@ static int accdet_get_dts_data(void)
 		accdet->data->caps |= ACCDET_FOUR_KEY;
 	else if (tmp == 2)
 		accdet->data->caps |= ACCDET_TRI_KEY_CDD;
-
-	pr_info("accdet caps=%x\n", accdet->data->caps);
+// TN Begin modified by qinghua.zeng/860624 20230913 CR/EKFOGO4G-1985
+	//pr_info("accdet caps=%x\n", accdet->data->caps);
+// TN End modified by qinghua.zeng/860624 20230913 CR/EKFOGO4G-1985
 	if (HAS_CAP(accdet->data->caps, ACCDET_FOUR_KEY)) {
 		int four_key[5];
 
@@ -1894,6 +1959,16 @@ static void config_eint_init_by_mode(void)
 				ACCDET_EINT0_PWM_EN_SFT);
 		accdet_update_bit(ACCDET_EINT0_PWM_IDLE_ADDR,
 				ACCDET_EINT0_PWM_IDLE_SFT);
+// TN Begin modified by qinghua.zeng/860624 20231017 CR/EKFOGO4G-2887
+		/* For normal mode, select VTH to 2v and 500k, use internal resitance,
+		 * 239E bit[10][11][12] = 1
+		 */
+		accdet_write(RG_AUDACCDETMICBIAS0PULLLOW_ADDR,
+			accdet_read(RG_AUDACCDETMICBIAS0PULLLOW_ADDR) | 0x1C00);
+		pr_info("%s: register 0x%x=0x%x", __func__,
+			RG_AUDACCDETMICBIAS0PULLLOW_ADDR,
+			accdet_read(RG_AUDACCDETMICBIAS0PULLLOW_ADDR));
+// TN End modified by qinghua.zeng/860624 20231017 CR/EKFOGO4G-2887
 	} else if (HAS_CAP(accdet->data->caps, ACCDET_PMIC_EINT1)) {
 		accdet_update_bits(ACCDET_EINT0_PWM_THRESH_ADDR, 0x8, 0x6, 0x6);
 		accdet_update_bits(ACCDET_EINT0_PWM_WIDTH_ADDR, 0xc, 0x2, 0x2);
@@ -2073,7 +2148,7 @@ int mt6358_accdet_init(struct snd_soc_component *component,
 	}
 
 	accdet->jack.jack->input_dev->id.bustype = BUS_HOST;
-	snd_jack_set_key(accdet->jack.jack, SND_JACK_BTN_0, KEY_MEDIA);
+	snd_jack_set_key(accdet->jack.jack, SND_JACK_BTN_0, KEY_PLAYPAUSE);
 	snd_jack_set_key(accdet->jack.jack, SND_JACK_BTN_1, KEY_VOLUMEDOWN);
 	snd_jack_set_key(accdet->jack.jack, SND_JACK_BTN_2, KEY_VOLUMEUP);
 	snd_jack_set_key(accdet->jack.jack, SND_JACK_BTN_3, KEY_VOICECOMMAND);
@@ -2101,7 +2176,9 @@ static int mt6358_accdet_probe(struct platform_device *pdev)
 	accdet = devm_kzalloc(&pdev->dev, sizeof(*accdet), GFP_KERNEL);
 	if (!accdet)
 		return -ENOMEM;
-
+// TN Begin modified by qinghua.zeng/860624 20231101 CR/EKFOGO4G-5073
+	pr_notice("%s accdet :(%p)\n", __func__, accdet);
+// TN End modified by qinghua.zeng/860624 20231101 CR/EKFOGO4G-5073
 	accdet->data = (struct accdet_priv *)of_id->data;
 	accdet->pdev = pdev;
 

@@ -51,7 +51,6 @@ static struct device_attribute tcpc_device_attributes[] = {
 	TCPC_DEVICE_ATTR(timer, 0664),
 	TCPC_DEVICE_ATTR(caps_info, 0444),
 	TCPC_DEVICE_ATTR(pe_ready, 0444),
-	TCPC_DEVICE_ATTR(cc_orientation, S_IRUGO | S_IWUSR | S_IWGRP),
 };
 
 enum {
@@ -62,7 +61,6 @@ enum {
 	TCPC_DESC_TIMER,
 	TCPC_DESC_CAP_INFO,
 	TCPC_DESC_PE_READY,
-	TCPC_DESC_CC_POLA,
 };
 
 static struct attribute *__tcpc_attrs[ARRAY_SIZE(tcpc_device_attributes) + 1];
@@ -183,12 +181,11 @@ static ssize_t tcpc_show_property(struct device *dev,
 		}
 		break;
 	case TCPC_DESC_PD_TEST:
-		ret = snprintf(buf, 256, "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+		ret = snprintf(buf, 256, "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
 				"1: pr_swap", "2: dr_swap", "3: vconn_swap",
 				"4: soft reset", "5: hard reset",
 				"6: get_src_cap", "7: get_sink_cap",
-				"8: discover_id", "9: discover_cable",
-				"10: enable wd pro", "11: disable wd pro");
+				"8: discover_id", "9: discover_cable");
 		if (ret < 0)
 			dev_dbg(dev, "%s: ret=%d\n", __func__, ret);
 		break;
@@ -229,13 +226,6 @@ static ssize_t tcpc_show_property(struct device *dev,
 		}
 		break;
 #endif
- case TCPC_DESC_CC_POLA:
-               if (tcpm_inquire_cc_polarity(tcpc))
-                       snprintf(buf, 256, "%s\n", "CC2");
-               else
-                       snprintf(buf, 256, "%s\n", "CC1");
-               break;
-
 	default:
 		break;
 	}
@@ -348,12 +338,6 @@ static ssize_t tcpc_store_property(struct device *dev,
 			break;
 		case 9:
 			tcpm_dpm_vdm_discover_cable(tcpc, NULL);
-			break;
-		case 10:
-			tcpci_set_water_protection(tcpc, true);
-			break;
-		case 11:
-			tcpci_set_water_protection(tcpc, false);
 			break;
 		default:
 			break;

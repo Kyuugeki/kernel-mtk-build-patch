@@ -16,6 +16,9 @@
 #include <lpm.h>
 
 #include <lpm_plat_apmcu.h>
+#if IS_ENABLED(CONFIG_MTK_LPM_MT6833)
+#include <lpm_plat_apmcu_mbox.h>
+#endif
 #include <lpm_module.h>
 
 
@@ -23,6 +26,11 @@ void __iomem *cpu_pm_mcusys_base;
 void __iomem *cpu_pm_syssram_base;
 
 #define plat_node_ready()       (cpu_pm_mcusys_base && cpu_pm_syssram_base)
+
+#if IS_ENABLED(CONFIG_MTK_LPM_MT6833)
+#define BOOT_TIME_LIMIT         60
+static struct task_struct *lpm_plat_task;
+#endif
 
 /* qos */
 static struct pm_qos_request lpm_plat_qos_req;
@@ -73,11 +81,6 @@ static struct lpm_device lp_dev_cpu[NR_CPUS];
 static struct lpm_device lp_dev_cluster[nr_cluster_ids];
 static struct lpm_device lp_dev_mcusys;
 
-struct lpm_cpuhp_info {
-	unsigned int status;
-	unsigned int cpuhp_nb;
-	unsigned int cpu;
-};
 
 static void _lpm_plat_inc_pwr_cnt(struct lpm_device *dev,
 					unsigned int lvl)
@@ -194,7 +197,7 @@ bool lpm_plat_is_cluster_off(int cpu)
 static int __lpm_cpuhp_notify_enter(unsigned int type, unsigned int cpu)
 {
 	pr_info("[name:lpm][p] lpm_cpuhp_notify_enter, type: %u cpu: %u\n", type, cpu);
-	cpuidle_pause_and_lock();
+	lpm_cpu_off_block();
 	return 0;
 }
 
@@ -203,7 +206,7 @@ static int __lpm_cpuhp_notify_leave(unsigned int type, unsigned int cpu)
 	pr_info("[name:lpm][p] lpm_cpuhp_notify_leave, type: %u cpu: %u\n", type, cpu);
 	lpm_dev_set_cpus_off();
 	lpm_dev_get_cpus_online();
-	cpuidle_resume_and_unlock();
+	lpm_cpu_off_allow();
 	return 0;
 }
 
@@ -245,6 +248,54 @@ static inline void get_monotonic_boottime(struct timespec64 *ts)
 {
 	*ts = ktime_to_timespec64(ktime_get_boottime());
 }
+
+#if IS_ENABLED(CONFIG_MTK_LPM_MT6833)
+#define DEPD_COND_TYPE_BOOTIME  (1<<0u)
+#define DEPD_COND_TYPE_MCU      (1<<1u)
+
+static int __lpm_plat_wait_depd_condition(int type, void *arg)
+{
+	struct timespec64 uptime;
+	bool mcupm_rdy = false;
+	bool boot_time_pass = false;
+
+	if (type & DEPD_COND_TYPE_MCU) {
+		mtk_wait_mbox_init_done();
+		mtk_notify_subsys_ap_ready();
+	} else
+		mcupm_rdy = true;
+
+	do {
+		msleep(1000);
+
+		if (!mcupm_rdy && mtk_mcupm_is_ready())
+			mcupm_rdy = true;
+
+		if ((type & DEPD_COND_TYPE_BOOTIME) &&
+		    !boot_time_pass) {
+			get_monotonic_boottime(&uptime);
+
+			if ((unsigned int)uptime.tv_sec > BOOT_TIME_LIMIT)
+				boot_time_pass = true;
+		}
+	} while (!(mcupm_rdy && boot_time_pass));
+
+	lpm_cpu_off_allow();
+	lpm_plat_cpuhp_init();
+
+	return 0;
+}
+
+static int lpm_plat_wait_depd_condition_nonmcu(void *arg)
+{
+	return __lpm_plat_wait_depd_condition(DEPD_COND_TYPE_BOOTIME, arg);
+}
+static int lpm_plat_wait_depd_condition(void *arg)
+{
+	return __lpm_plat_wait_depd_condition((DEPD_COND_TYPE_BOOTIME
+					       | DEPD_COND_TYPE_MCU), arg);
+}
+#endif
 
 static void __init lpm_plat_pwr_dev_init(void)
 {
@@ -299,15 +350,44 @@ static int __init lpm_plat_mcusys_ctrl_init(void)
 
 int __init lpm_plat_apmcu_init(void)
 {
+#if IS_ENABLED(CONFIG_MTK_LPM_MT6833)
+	struct device_node *node = NULL;
+	unsigned int is_mcu_mode = 0;
+#endif
 	if (!plat_node_ready()) {
 		lpm_plat_qos_uninit();
 		return 0;
 	}
 
 	lpm_plat_pwr_dev_init();
+
+#if IS_ENABLED(CONFIG_MTK_LPM_MT6833)
+	node = of_find_compatible_node(NULL, NULL, MTK_LPM_DTS_COMPATIBLE);
+	if (node) {
+		const char *method = NULL;
+
+		of_property_read_string(node, "cpupm-method", &method);
+		if (method && !strcmp(method, "mcu"))
+			is_mcu_mode = 1;
+		of_node_put(node);
+	}
+
+	if (is_mcu_mode)
+		lpm_plat_task =
+			kthread_create(lpm_plat_wait_depd_condition,
+				       NULL, "lpm_plat_wait_rdy");
+	else
+		lpm_plat_task =
+			kthread_create(lpm_plat_wait_depd_condition_nonmcu,
+				       NULL, "lpm_plat_wait_rdy");
+	if (!IS_ERR(lpm_plat_task))
+		wake_up_process(lpm_plat_task);
+	else
+		pr_notice("Create thread fail @ %s()\n", __func__);
+#else
 	lpm_cpu_off_allow();
 	lpm_plat_cpuhp_init();
-
+#endif
 	return 0;
 }
 

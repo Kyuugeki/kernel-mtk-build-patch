@@ -280,6 +280,28 @@ int charger_dev_get_constant_voltage(struct charger_device *chg_dev, u32 *uV)
 }
 EXPORT_SYMBOL(charger_dev_get_constant_voltage);
 
+/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+int charger_dev_set_dp_voltage(struct charger_device *chg_dev, u32 uV)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+	    chg_dev->ops->set_dp)
+		return chg_dev->ops->set_dp(chg_dev, uV);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_set_dp_voltage);
+
+int charger_dev_set_dm_voltage(struct charger_device *chg_dev, u32 uV)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+	    chg_dev->ops->set_dm)
+		return chg_dev->ops->set_dm(chg_dev, uV);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_set_dm_voltage);
+/*TN End modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+
 int charger_dev_dump_registers(struct charger_device *chg_dev)
 {
 	if (chg_dev != NULL && chg_dev->ops != NULL &&
@@ -368,15 +390,17 @@ int charger_dev_enable_hz(struct charger_device *chg_dev, bool en)
 }
 EXPORT_SYMBOL(charger_dev_enable_hz);
 
-int charger_dev_enable_adc(struct charger_device *chg_dev, bool en)
+/*TN Begin modified by zhen.liu11/860655 20230912 CR/EKFOGO4G-1483*/
+int charger_dev_enable_adc(struct charger_device *charger_dev, bool enable)
 {
-	if (chg_dev != NULL && chg_dev->ops != NULL &&
-	    chg_dev->ops->enable_adc)
-		return chg_dev->ops->enable_adc(chg_dev, en);
+	if (charger_dev != NULL && charger_dev->ops != NULL &&
+	    charger_dev->ops->enable_adc)
+		return charger_dev->ops->enable_adc(charger_dev, enable);
 
 	return -EOPNOTSUPP;
 }
 EXPORT_SYMBOL(charger_dev_enable_adc);
+/*TN End modified by zhen.liu11/860655 20230912 CR/EKFOGO4G-1483*/
 
 int charger_dev_get_adc(struct charger_device *charger_dev,
 	enum adc_channel chan, int *min, int *max)
@@ -554,16 +578,6 @@ int charger_dev_set_vbatovp_alarm(struct charger_device *chg_dev, u32 uV)
 }
 EXPORT_SYMBOL(charger_dev_set_vbatovp_alarm);
 
-int charger_dev_config_mux(struct charger_device *chg_dev,
-	enum mmi_dvchg_mux_channel typec_mos, enum mmi_dvchg_mux_channel wls_mos)
-{
-	if (chg_dev != NULL && chg_dev->ops != NULL &&
-	    chg_dev->ops->config_mux)
-		return chg_dev->ops->config_mux(chg_dev, typec_mos, wls_mos);
-	return -EOPNOTSUPP;
-}
-EXPORT_SYMBOL(charger_dev_config_mux);
-
 int charger_dev_reset_vbatovp_alarm(struct charger_device *chg_dev)
 {
 	if (chg_dev != NULL && chg_dev->ops != NULL &&
@@ -599,6 +613,57 @@ int charger_dev_is_vbuslowerr(struct charger_device *chg_dev, bool *err)
 	return -EOPNOTSUPP;
 }
 EXPORT_SYMBOL(charger_dev_is_vbuslowerr);
+
+/*TN Begin modified by hao.jia/809321 20230830 CR/EKFOGO4G-1677*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+int charger_dev_is_vbushigher(struct charger_device *chg_dev, bool *err)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+		chg_dev->ops->is_vbushigher)
+		return chg_dev->ops->is_vbushigher(chg_dev, err);
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_is_vbushigher);
+
+int charger_dev_is_vbat_present(struct charger_device *chg_dev, bool *present)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+	    chg_dev->ops->is_vbat_present)
+		return chg_dev->ops->is_vbat_present(chg_dev, present);
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_is_vbat_present);
+
+int charger_dev_is_vbus_present(struct charger_device *chg_dev, bool *present)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+	    chg_dev->ops->is_vbus_present)
+		return chg_dev->ops->is_vbus_present(chg_dev, present);
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_is_vbus_present);
+
+int charger_dev_enable_dpdm_hz(struct charger_device *chg_dev)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL &&
+	    chg_dev->ops->enable_dpdm_hz)
+		return chg_dev->ops->enable_dpdm_hz(chg_dev);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_enable_dpdm_hz);
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+int charger_dev_enable_acdrv1(struct charger_device *chg_dev, bool en)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->enable_acdrv1)
+		return chg_dev->ops->enable_acdrv1(chg_dev, en);
+
+	return -EOPNOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_enable_acdrv1);
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#endif
+/*TN End modified by hao.jia/809321 20230830 CR/EKFOGO4G-1677*/
 
 int charger_dev_init_chip(struct charger_device *chg_dev)
 {
@@ -647,35 +712,6 @@ int charger_dev_set_boost_current_limit(struct charger_device *chg_dev, u32 uA)
 	return -EOPNOTSUPP;
 }
 EXPORT_SYMBOL(charger_dev_set_boost_current_limit);
-
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-int charger_dev_get_vrefts(struct charger_device *chg_dev, int *uV)
-{
-	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->get_vrefts_adc)
-		return chg_dev->ops->get_vrefts_adc(chg_dev, uV);
-
-	return -EOPNOTSUPP;
-}
-EXPORT_SYMBOL(charger_dev_get_vrefts);
-
-int charger_dev_get_ts(struct charger_device *chg_dev, int *uV)
-{
-	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->get_ts_adc)
-		return chg_dev->ops->get_ts_adc(chg_dev, uV);
-
-	return -EOPNOTSUPP;
-}
-EXPORT_SYMBOL(charger_dev_get_ts);
-
-int charger_dev_enable_mos_short(struct charger_device *chg_dev, bool en)
-{
-	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->enable_mos_short)
-		return chg_dev->ops->enable_mos_short(chg_dev, en);
-
-	return -EOPNOTSUPP;
-}
-EXPORT_SYMBOL(charger_dev_enable_mos_short);
-#endif
 
 int charger_dev_get_zcv(struct charger_device *chg_dev, u32 *uV)
 {
@@ -969,7 +1005,11 @@ static int __init charger_class_init(void)
 	return 0;
 }
 
+#if IS_BUILTIN(CONFIG_MTK_CHARGER)
+subsys_initcall(charger_class_init);
+#else
 module_init(charger_class_init);
+#endif
 module_exit(charger_class_exit);
 
 MODULE_DESCRIPTION("Switching Charger Class Device");

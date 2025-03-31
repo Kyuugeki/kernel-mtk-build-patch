@@ -357,6 +357,7 @@ static int mt_usb_role_sw_register(struct otg_switch_mtk *otg_sx)
 
 	role_sx_desc.set = mt_usb_role_sx_set;
 	role_sx_desc.get = mt_usb_role_sx_get;
+	role_sx_desc.allow_userspace_control = true;
 	role_sx_desc.fwnode = dev_fwnode(glue->dev);
 	role_sx_desc.driver_data = glue;
 	otg_sx->role_sw = usb_role_switch_register(glue->dev, &role_sx_desc);
@@ -441,6 +442,7 @@ int mt_usb_otg_switch_init(struct mt_usb_glue *glue)
 	struct otg_switch_mtk *otg_sx = &glue->otg_sx;
 	struct musb *mtk_musb = glue->mtk_musb;
 	int ret = 0;
+	struct musb_hdrc_platform_data *pdata;
 
 	/* we need to keep otg_sx here for cmode operations */
 	mtk_musb->otg_sx = otg_sx;
@@ -454,6 +456,27 @@ int mt_usb_otg_switch_init(struct mt_usb_glue *glue)
 
 	/* initial operation mode */
 	otg_sx->op_mode = MUSB_DR_OPERATION_NORMAL;
+
+	pdata = glue->musb_pdev->dev.platform_data;
+	if (pdata) {
+		switch (pdata->dr_mode) {
+		case USB_DR_MODE_PERIPHERAL:
+			set_usb_phy_clear();
+			phy_power_on(glue->phy);
+			musb_force_on = 1;
+			mtk_musb->power = 0;
+			mtk_musb->is_host = 0;
+			mt_usb_set_mailbox(otg_sx, MUSB_VBUS_VALID);
+			return ret;
+		case USB_DR_MODE_HOST:
+			phy_power_on(glue->phy);
+			mtk_musb->is_host = 0;
+			mt_usb_set_mailbox(otg_sx, MUSB_ID_GROUND);
+			return ret;
+		default:
+			break;
+		}
+	}
 
 	ret = sysfs_create_group(&mtk_musb->controller->kobj, &mt_usb_dr_group);
 	if (ret)

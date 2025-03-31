@@ -128,14 +128,14 @@ static struct imgsensor_info_struct imgsensor_info = {
 		},
 		.normal_video = {
 			.pclk = 560000000,
-			.linelength = 12960,
-			.framelength = 1440,
+			.linelength = 11520,
+			.framelength = 1616,
 			.startx = 0,
 			.starty = 0,
-			.grabwindow_width = 1920,
-			.grabwindow_height = 1080,
+			.grabwindow_width = 2320,
+			.grabwindow_height = 1306,
 			.mipi_data_lp2hs_settle_dc = 85,
-			.mipi_pixel_rate = 216666667,
+			.mipi_pixel_rate = 307200000,
 			.max_framerate = 300,
 		},
 		.hs_video = {
@@ -208,8 +208,8 @@ static struct SENSOR_WINSIZE_INFO_STRUCT imgsensor_winsize_info[5] = {
 	{4640, 3488,    0,    0, 4640, 3488, 2320, 1744,
 	    0,    0, 2320, 1744,    0,    0, 2320, 1744},/* Capture == Preview*/
 #endif
-	{4640, 3488,  400,  664, 3840, 2160, 1920, 1080,
-	    0,    0, 1920, 1080,    0,    0, 1920, 1080},/* Video */
+	{4640, 3488, 0000,  438, 4640, 2612, 2320, 1306,
+	 0000, 0000, 2320, 1306,    0,    0, 2320, 1306},/* Video */
 	{4640, 3488,  400,  664, 3840, 2160, 1920, 1080,
 	    0,    0, 1920, 1080,    0,    0, 1920, 1080},/* hs_video == Video */
 	{4640, 3488, 1024,  784, 2592, 1920, 1296,  960,
@@ -1273,8 +1273,6 @@ static int feature_control(struct subdrv_ctx *ctx, MSDK_SENSOR_FEATURE_ENUM feat
 	UINT32 *feature_return_para_32 = (UINT32 *) feature_para;
 	UINT32 *feature_data_32 = (UINT32 *) feature_para;
 	unsigned long long *feature_data = (unsigned long long *) feature_para;
-	char *data = (char *)(uintptr_t)(*(feature_data + 1));
-	UINT16 type = (UINT16)(*feature_data);
 
 	struct SET_PD_BLOCK_INFO_T *PDAFinfo;
 	struct SENSOR_WINSIZE_INFO_STRUCT *wininfo;
@@ -1549,14 +1547,18 @@ static int feature_control(struct subdrv_ctx *ctx, MSDK_SENSOR_FEATURE_ENUM feat
 		*(feature_data + 2) = imgsensor_info.margin;
 		break;
 	case SENSOR_FEATURE_GET_4CELL_DATA:
-		/*get 4 cell data from eeprom*/
-		if (type == FOUR_CELL_CAL_TYPE_XTALK_CAL) {
-			LOG_DEBUG("Read Cross Talk Start");
-			read_four_cell_from_eeprom(ctx, data);
-			LOG_DEBUG("Read Cross Talk = %02x %02x %02x %02x %02x %02x\n",
-				(UINT16)data[0], (UINT16)data[1],
-				(UINT16)data[2], (UINT16)data[3],
-				(UINT16)data[4], (UINT16)data[5]);
+		{
+			char *data = (char *)(uintptr_t)(*(feature_data + 1));
+			UINT16 type = (UINT16)(*feature_data);
+			/*get 4 cell data from eeprom*/
+			if (type == FOUR_CELL_CAL_TYPE_XTALK_CAL) {
+				LOG_DEBUG("Read Cross Talk Start");
+				read_four_cell_from_eeprom(ctx, data);
+				LOG_DEBUG("Read Cross Talk = %02x %02x %02x %02x %02x %02x\n",
+					(UINT16)data[0], (UINT16)data[1],
+					(UINT16)data[2], (UINT16)data[3],
+					(UINT16)data[4], (UINT16)data[5]);
+			}
 		}
 		break;
 	case SENSOR_FEATURE_SET_STREAMING_SUSPEND:

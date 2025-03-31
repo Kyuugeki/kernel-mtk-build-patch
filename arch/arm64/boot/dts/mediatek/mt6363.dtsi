@@ -115,7 +115,7 @@
 			};
 
 			home {
-				linux,keycodes = <114>;
+				linux,keycodes = <115>;
 			};
 		};
 

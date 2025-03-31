@@ -407,6 +407,16 @@ static inline bool pd_process_timer_msg(
 			return true;
 		}
 
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+#ifdef CONFIG_SUPPORT_PISEN_ADAPTER
+		if ((pd_port->pe_state_curr == PE_SNK_DISCOVERY) &&
+			(pe_data->retry_cnt < PD_HARD_RESET_RETRY_COUNT)) {
+			pe_data->retry_cnt++;
+			PE_TRANSIT_STATE(pd_port, PE_SNK_HARD_RESET);
+			return true;
+		}
+#endif /* CONFIG_SUPPORT_PISEN_ADAPTER */
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 		PE_INFO("SRC NoResp\n");
 		if (pd_port->request_v == TCPC_VBUS_SINK_5V) {
 			pd_report_typec_only_charger(pd_port);

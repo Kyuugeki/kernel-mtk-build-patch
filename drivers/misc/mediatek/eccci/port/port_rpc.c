@@ -42,10 +42,6 @@
 #include "ccci_bm.h"
 #include "ccci_modem.h"
 #include "port_rpc.h"
-#ifdef CONFIG_MOTO_DRDI_SUPPORT
-#include "mt-plat/mtk_ccci_common.h"
-#endif
-
 #define MAX_QUEUE_LENGTH 16
 
 static struct gpio_item gpio_mapping_table[] = {
@@ -1172,76 +1168,7 @@ static void ccci_rpc_work_helper(struct port_t *port, struct rpc_pkt *pkt,
 			1, pkt[1].len, *((unsigned int *)pkt[1].buf));
 			break;
 		}
-#ifdef CONFIG_MOTO_DRDI_SUPPORT
-	case IPC_RPC_PRODUCT_OP:
-		{
-			struct ccci_product_data_t *product_data = NULL;
-			unsigned int product_data_len = 0;
 
-			CCCI_NORMAL_LOG(md_id, RPC,
-				"enter IPC_RPC_PRODUCT_OP\n");
-			product_data = ccci_rpc_get_product_data(&product_data_len);
-			if (!product_data) {
-				CCCI_ERROR_LOG(md_id, RPC, "%s:get product_data fail\n",
-					__func__);
-			}
-
-			if (product_data_len <= 0) {
-				tmp_data[0] = -1;
-				pkt_num = 0;
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[1]);
-				break;
-			}
-
-			pkt_num = 0;
-			pkt[pkt_num].len = sizeof(unsigned int);
-			pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-			pkt[pkt_num].len = product_data_len;
-			pkt[pkt_num++].buf = (void *)product_data;
-
-			break;
-		}
-#endif
-
-#ifdef CONFIG_MOTO_CCCI_SEC_SUPPORT
-	case IPC_RPC_CIDDATA_OP:
-		{
-			struct ccci_security_data_t *security_data = NULL;
-			unsigned int security_data_len = 0;
-			unsigned int offset = 0;
-			unsigned int stepsize = 0;
-			offset = *(unsigned int *)(pkt[0].buf) & 0xffff;
-			stepsize = (*(unsigned int *)(pkt[0].buf)>>16) & 0xffff;
-
-			CCCI_NORMAL_LOG(md_id, RPC,
-				"enter IPC_RPC_CIDDATA_OP offset :%d, stepsize:%d\n", offset, stepsize);
-			security_data = ccci_rpc_get_security_data(&security_data_len);
-
-			if (!security_data || security_data_len <= 0) {
-
-				CCCI_ERROR_LOG(md_id, RPC, "%s:get security_data fail\n", __func__);
-				tmp_data[0] = -1;
-				pkt_num = 0;
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-				pkt[pkt_num].len = sizeof(unsigned int);
-				pkt[pkt_num++].buf = (void *)(&tmp_data[1]);
-				break;
-			}
-
-			pkt_num = 0;
-			pkt[pkt_num].len = sizeof(unsigned int);
-			pkt[pkt_num++].buf = (void *)(&tmp_data[0]);
-
-			pkt[pkt_num].len = stepsize;
-			pkt[pkt_num++].buf = (void *)(&security_data->cid_data[offset]);
-
-			break;
-		}
-#endif
 	default:
 		CCCI_NORMAL_LOG(md_id, RPC,
 		"[Error]Unknown Operation ID (0x%08X)\n",
@@ -1414,7 +1341,7 @@ static int port_rpc_dev_mmap(struct file *fp, struct vm_area_struct *vma)
 			amms_smem->size, vma->vm_end - vma->vm_start);
 	if ((vma->vm_end - vma->vm_start) != amms_smem->size) {
 		CCCI_ERROR_LOG(md_id, RPC,
-			"smem size error:%s,vm_start=0x%llx,vm_end=0x%llx,smem_size=0x%x\n",
+			"smem size error:%s,vm_start=0x%lx,vm_end=0x%lx,smem_size=0x%x\n",
 			port->name, vma->vm_start, vma->vm_end, amms_smem->size);
 		return -EINVAL;
 	}
@@ -1522,6 +1449,7 @@ int port_rpc_recv_match(struct port_t *port, struct sk_buff *skb)
 		case IPC_RPC_QUERY_AP_SYS_PROPERTY:
 		case IPC_RPC_SAR_TABLE_IDX_QUERY_OP:
 		case IPC_RPC_AMMS_DRDI_CONTROL:
+		case IPC_RPC_SAVE_MD_CAPID:
 			is_userspace_msg = 1;
 			break;
 		default:

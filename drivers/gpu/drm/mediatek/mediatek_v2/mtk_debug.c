@@ -39,6 +39,9 @@
 #include "mtk_dp_debug.h"
 #include "mtk_drm_arr.h"
 #include "mtk_drm_graphics_base.h"
+#include "mtk_disp_bdg.h"
+#include "mtk_dsi.h"
+#include <linux/pm_domain.h>
 
 #define DISP_REG_CONFIG_MMSYS_CG_SET(idx) (0x104 + 0x10 * (idx))
 #define DISP_REG_CONFIG_MMSYS_CG_CLR(idx) (0x108 + 0x10 * (idx))
@@ -56,19 +59,21 @@
 #define GET_M4U_PORT 0x1F
 #define MTK_CWB_NO_EFFECT_HRT_MAX_WIDTH 128
 
-#define MAX_CMD_PAYLOAD_SIZE	256
-#define DCS_READ_NO_PARAM 0x06
-char dcs_read[MAX_CMD_PAYLOAD_SIZE];
-char read_dlen = 0;
+/* If it is 64bit use __pa_nodebug, otherwise use __pa_symbol_nodebug or __pa */
+#ifndef __pa_nodebug
+#ifdef __pa_symbol_nodebug
+#define __pa_nodebug __pa_symbol_nodebug
+#else
+#define __pa_nodebug __pa
+#endif
+#endif
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)
 static struct dentry *mtkfb_dbgfs;
-static struct dentry *motUtil_dbgfs;
 #endif
 
 #if IS_ENABLED(CONFIG_PROC_FS)
 static struct proc_dir_entry *mtkfb_procfs;
-static struct proc_dir_entry *motUtil_procfs;
 static struct proc_dir_entry *disp_lowpower_proc;
 static struct proc_dir_entry *mtkfb_debug_procfs;
 #endif
@@ -97,6 +102,8 @@ static unsigned int m_old_pq_persist_property[32];
 unsigned int m_new_pq_persist_property[32];
 
 unsigned int g_mml_mode;
+// TN modified by kexin.wang/860557 20231226 CR/EKFOGO4G-8317
+unsigned int esd_rec_level;
 
 int gCaptureOVLEn;
 int gCaptureWDMAEn;
@@ -145,7 +152,78 @@ static bool logger_enable = 1;
 static bool logger_enable;
 #endif
 
-static bool reading_cellid = false;
+#define MT6768_DISP_REG_RDMA_OUT_LINE_CNT 0x0fC
+#define MT6768_DISP_REG_RDMA_DBG_OUT1 0x10C
+
+int polling_rdma_output_line_enable;
+static struct notifier_block nb;
+static unsigned long pm_penpd_status = GENPD_NOTIFY_OFF;
+
+/* SW workaround.
+ * Polling RDMA output line isn't 0 && RDMA status is run,
+ * before switching mm clock mux in cmd mode.
+ */
+void polling_rdma_output_line_is_not_zero(void)
+{
+	struct mtk_drm_private *priv = NULL;
+	struct mtk_ddp_comp *comp = NULL;
+	unsigned int loop_cnt = 0;
+
+	if (!drm_dev) {
+		DDPMSG("%s drm_dev is null\n", __func__);
+		return;
+	}
+	priv = drm_dev->dev_private;
+
+	if (!priv) {
+		DDPMSG("%s priv is null\n", __func__);
+		return;
+	}
+	comp = priv->ddp_comp[DDP_COMPONENT_RDMA0];
+
+	if (!comp || !comp->mtk_crtc ||
+			pm_penpd_status == GENPD_NOTIFY_PRE_OFF ||
+			pm_penpd_status == GENPD_NOTIFY_OFF) {
+		DDPDBG("%s DISP power status:%d\n",
+			__func__, pm_penpd_status);
+		return;
+	}
+
+	if (polling_rdma_output_line_enable &&
+		mtk_crtc_is_frame_trigger_mode(&comp->mtk_crtc->base)) {
+		DDPDBG("%s start\n", __func__);
+
+		while (loop_cnt < 1*1000) {
+			if (readl(comp->regs + MT6768_DISP_REG_RDMA_OUT_LINE_CNT) ||
+					!(readl(comp->regs + MT6768_DISP_REG_RDMA_DBG_OUT1) & 0x1))
+				break;
+			loop_cnt++;
+			udelay(1);
+		}
+
+		if (loop_cnt == 1000)
+			DDPMSG("%s delay loop_cnt=%d, outline=0x%x\n",
+				__func__, loop_cnt,
+				readl(comp->regs + MT6768_DISP_REG_RDMA_OUT_LINE_CNT));
+
+		/* DDPDBG("%s done\n", __func__); */
+	}
+}
+
+static int mtk_disp_pd_callback(struct notifier_block *nb,
+				unsigned long flags, void *data)
+{
+	pm_penpd_status = flags;
+	if (flags == GENPD_NOTIFY_PRE_OFF)
+		DDPDBG("%s,enter suspend pre_off\n", __func__);
+	else if (flags == GENPD_NOTIFY_OFF)
+		DDPDBG("%s,enter suspend off\n", __func__);
+	else if (flags == GENPD_NOTIFY_PRE_ON)
+		DDPDBG("%s,enter resume pre_on\n", __func__);
+	else if (flags == GENPD_NOTIFY_ON)
+		DDPDBG("%s,enter resume on\n", __func__);
+	return NOTIFY_OK;
+}
 
 static int draw_RGBA8888_buffer(char *va, int w, int h,
 		       char r, char g, char b, char a)
@@ -211,7 +289,7 @@ static unsigned long long get_current_time_us(void)
 	return time;
 
 	ktime_get_ts64(&t);
-	return (t.tv_sec & 0xFFF) * 1000000 + t.tv_nsec / NSEC_PER_USEC;
+	return (t.tv_sec & 0xFFF) * 1000000 + DO_COMMON_DIV(t.tv_nsec, NSEC_PER_USEC);
 }
 
 static char *_logger_pr_type_spy(enum DPREC_LOGGER_PR_TYPE type)
@@ -234,9 +312,11 @@ static char *_logger_pr_type_spy(enum DPREC_LOGGER_PR_TYPE type)
 
 static void init_log_buffer(void)
 {
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 	unsigned long va;
 	unsigned long pa;
 	unsigned long size;
+#endif
 	int i, buf_size, buf_idx;
 	char *temp_buf;
 
@@ -299,13 +379,13 @@ static void init_log_buffer(void)
 	dprec_logger_buffer[4].buffer_ptr = status_buffer;
 
 	is_buffer_init = true;
-
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 	va = (unsigned long)err_buffer[0];
 	pa = __pa_nodebug(va);
 	size = (DEBUG_BUFFER_SIZE - 4096);
 
 	mrdump_mini_add_extra_file(va, pa, size, "DISPLAY");
-
+#endif
 	DDPINFO("[DISP]%s success\n", __func__);
 	return;
 err:
@@ -367,7 +447,7 @@ int mtk_dprec_logger_pr(unsigned int type, char *fmt, ...)
 
 		rem_nsec = do_div(time, 1000000000);
 		n += snprintf(buf + n, len - n, "[%5lu.%06lu]",
-			      (unsigned long)time, rem_nsec / 1000);
+			      (unsigned long)time, DO_COMMON_DIV(rem_nsec, 1000));
 
 		va_start(args, fmt);
 		n += vscnprintf(buf + n, len - n, fmt, args);
@@ -421,24 +501,110 @@ int mtkfb_set_backlight_level(unsigned int level)
 		return -EINVAL;
 	}
 
+	// TN modified by kexin.wang/860557 20231226 CR/EKFOGO4G-8317
+	esd_rec_level = level;
+
 	/* this debug cmd only for crtc0 */
 	crtc = list_first_entry(&(drm_dev)->mode_config.crtc_list,
-				typeof(*crtc), head);
+			typeof(*crtc), head);
 	if (IS_ERR_OR_NULL(crtc)) {
 		DDPPR_ERR("%s failed to find crtc\n", __func__);
 		return -EINVAL;
 	}
 
-	if (reading_cellid) {
-		DDPMSG("%s: is reading cellid, skip backlight\n");
-		return 0;
-	}
-
 	ret = mtk_drm_setbacklight(crtc, level);
+	DDPINFO("%s-%d, ret=%d\n", __func__, __LINE__, ret);
 
 	return ret;
 }
 EXPORT_SYMBOL(mtkfb_set_backlight_level);
+
+/* TN Begin modified by kexin.wang/860557 20231226 CR/EKFOGO4G-8317*/
+int mtkfb_esd_rec_set_backlight_level(void)
+{
+	DDPPR_ERR("%s: esd_rec_level %d\n", __func__, esd_rec_level);
+	return mtkfb_set_backlight_level(esd_rec_level);
+}
+EXPORT_SYMBOL(mtkfb_esd_rec_set_backlight_level);
+/* TN end modified by kexin.wang/860557 20231226 CR/EKFOGO4G-8317*/
+
+int mtk_drm_set_conn_backlight_level(unsigned int conn_id, unsigned int level)
+{
+	struct drm_crtc *crtc;
+	struct drm_connector *conn;
+	struct mtk_drm_private *priv;
+	struct mtk_drm_crtc *mtk_crtc;
+	struct mtk_dsi *mtk_dsi;
+	int ret = 0;
+
+	if (IS_ERR_OR_NULL(drm_dev)) {
+		DDPPR_ERR("%s, invalid drm dev\n", __func__);
+		return -EINVAL;
+	}
+
+	priv = drm_dev->dev_private;
+	if (IS_ERR_OR_NULL(priv)) {
+		DDPPR_ERR("%s, invalid priv\n", __func__);
+		return -EINVAL;
+	}
+
+	/* connector obj ref count add 1 after lookup */
+	conn = drm_connector_lookup(drm_dev, NULL, conn_id);
+	if (IS_ERR_OR_NULL(conn)) {
+		DDPPR_ERR("%s, invalid conn_id %u\n", __func__, conn_id);
+		return -EINVAL;
+	}
+
+	mtk_dsi = container_of(conn, struct mtk_dsi, conn);
+
+	mutex_lock(&priv->commit.lock);
+	mtk_crtc = mtk_dsi->ddp_comp.mtk_crtc;
+	crtc = (mtk_crtc) ? &mtk_crtc->base : NULL;
+
+	if (IS_ERR_OR_NULL(crtc)) {
+		DDPPR_ERR("%s, invalid crtc\n", __func__);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = mtk_drm_setbacklight(crtc, level);
+out:
+	drm_connector_put(conn);
+	mutex_unlock(&priv->commit.lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(mtk_drm_set_conn_backlight_level);
+
+int mtk_drm_get_conn_obj_id_from_idx(unsigned int disp_idx, int flag)
+{
+	struct drm_encoder *encoder;
+	unsigned int i = 0;
+	int conn_obj_id = 0;
+
+	if (IS_ERR_OR_NULL(drm_dev)) {
+		DDPPR_ERR("%s, invalid drm dev\n", __func__);
+		return -EINVAL;
+	}
+
+	drm_for_each_encoder(encoder, drm_dev) {
+		struct mtk_dsi *mtk_dsi;
+
+		if (encoder->encoder_type != DRM_MODE_ENCODER_DSI)
+			continue;
+
+		mtk_dsi = container_of(encoder, struct mtk_dsi, encoder);
+
+		/* there's not strong binding to disp_idx and DSI connector_obj_id */
+		if (mtk_dsi && disp_idx == i)
+			conn_obj_id = mtk_dsi->conn.base.id;
+
+		++i;
+	}
+
+	return conn_obj_id;
+}
+EXPORT_SYMBOL(mtk_drm_get_conn_obj_id_from_idx);
 
 int mtkfb_set_aod_backlight_level(unsigned int level)
 {
@@ -484,6 +650,23 @@ void mtk_disp_mipi_ccci_callback(unsigned int en, unsigned int usrdata)
 	return;
 }
 EXPORT_SYMBOL(mtk_disp_mipi_ccci_callback);
+
+void mtk_disp_mipi_clk_change(int msg, unsigned int en)
+{
+	struct mtk_drm_private *priv;
+
+	priv = drm_dev->dev_private;
+	if (IS_ERR_OR_NULL(priv)) {
+		DDPMSG("%s, priv is null!\n", __func__);
+		return;
+	}
+
+	if (priv->data->mmsys_id == MMSYS_MT6768 || priv->data->mmsys_id == MMSYS_MT6765) {
+		DDPMSG("%s, msg:%d, en:%d\n", __func__, msg, en);
+		mtk_disp_mipi_ccci_callback(en, (unsigned int)msg);
+	}
+}
+EXPORT_SYMBOL(mtk_disp_mipi_clk_change);
 
 void mtk_disp_osc_ccci_callback(unsigned int en, unsigned int usrdata)
 {
@@ -844,7 +1027,9 @@ int mtk_ddic_dsi_send_cmd(struct mtk_ddic_dsi_msg *cmd_msg,
 	struct mtk_drm_private *private;
 	struct mtk_ddp_comp *output_comp;
 	struct cmdq_pkt *cmdq_handle;
+	struct cmdq_client *gce_client;
 	bool is_frame_mode;
+	bool use_lpm = false;
 	struct mtk_cmdq_cb_data *cb_data;
 	int index = 0;
 	int ret = 0;
@@ -901,6 +1086,8 @@ int mtk_ddic_dsi_send_cmd(struct mtk_ddic_dsi_msg *cmd_msg,
 	}
 
 	is_frame_mode = mtk_crtc_is_frame_trigger_mode(&mtk_crtc->base);
+	if (cmd_msg)
+		use_lpm = cmd_msg->flags & MIPI_DSI_MSG_USE_LPM;
 
 	CRTC_MMP_MARK(index, ddic_send_cmd, 1, 0);
 
@@ -909,8 +1096,14 @@ int mtk_ddic_dsi_send_cmd(struct mtk_ddic_dsi_msg *cmd_msg,
 
 	CRTC_MMP_MARK(index, ddic_send_cmd, 2, 0);
 
-	mtk_crtc_pkt_create(&cmdq_handle, crtc,
-			mtk_crtc->gce_obj.client[CLIENT_DSI_CFG]);
+	/* only use CLIENT_DSI_CFG for VM CMD scenario */
+	/* use CLIENT_CFG otherwise */
+
+	gce_client = (!is_frame_mode && use_lpm) ?
+			mtk_crtc->gce_obj.client[CLIENT_DSI_CFG] :
+			mtk_crtc->gce_obj.client[CLIENT_CFG];
+
+	mtk_crtc_pkt_create(&cmdq_handle, crtc, gce_client);
 
 	if (mtk_crtc_with_sub_path(crtc, mtk_crtc->ddp_mode))
 		mtk_crtc_wait_frame_done(mtk_crtc, cmdq_handle,
@@ -924,8 +1117,6 @@ int mtk_ddic_dsi_send_cmd(struct mtk_ddic_dsi_msg *cmd_msg,
 			mtk_crtc->gce_obj.event[EVENT_STREAM_BLOCK]);
 		cmdq_pkt_wfe(cmdq_handle,
 			mtk_crtc->gce_obj.event[EVENT_CABC_EOF]);
-		cmdq_pkt_clear_event(cmdq_handle,
-			mtk_crtc->gce_obj.event[EVENT_STREAM_DIRTY]);
 	}
 
 	/* DSI_SEND_DDIC_CMD */
@@ -934,8 +1125,6 @@ int mtk_ddic_dsi_send_cmd(struct mtk_ddic_dsi_msg *cmd_msg,
 		DSI_SEND_DDIC_CMD, cmd_msg);
 
 	if (is_frame_mode) {
-		cmdq_pkt_set_event(cmdq_handle,
-			mtk_crtc->gce_obj.event[EVENT_STREAM_DIRTY]);
 		cmdq_pkt_set_event(cmdq_handle,
 			mtk_crtc->gce_obj.event[EVENT_CABC_EOF]);
 		cmdq_pkt_set_event(cmdq_handle,
@@ -1192,59 +1381,6 @@ done:
 	DDPMSG("%s end -\n", __func__);
 }
 
-/* adb shell "echo 0x39 0x03 0x51 0x0f 0xff > /proc/motUtil"
-*
-* 0x39   0x03       0x51   0x0f 0xff
-* TYPE   LENGTH   REG    DATA
-*/
-void ddic_dsi_send_cmd_motUtil(char input[])
-{
-	unsigned int i = 0, j = 0;
-	int ret;
-	struct mtk_ddic_dsi_msg *cmd_msg =
-		vmalloc(sizeof(struct mtk_ddic_dsi_msg));
-	u8 tx[256] = {0};
-
-	DDPMSG("%s start case_num:%s\n", __func__, input);
-
-	if (!cmd_msg) {
-		DDPPR_ERR("cmd msg is NULL\n");
-		return;
-	}
-	memset(cmd_msg, 0, sizeof(struct mtk_ddic_dsi_msg));
-
-	cmd_msg->channel = 0;
-	cmd_msg->flags = 0;
-	cmd_msg->tx_cmd_num = 1;
-	cmd_msg->type[0] = input[0];
-	strncpy(tx, &input[2], input[1]);
-	cmd_msg->tx_buf[0] = tx;
-	cmd_msg->tx_len[0] = input[1];
-
-	DDPMSG("send lcm tx_cmd_num:%d\n", (int)cmd_msg->tx_cmd_num);
-	for (i = 0; i < (int)cmd_msg->tx_cmd_num; i++) {
-		DDPMSG("send lcm tx_len[%d]=%d\n",
-			i, (int)cmd_msg->tx_len[i]);
-		for (j = 0; j < (int)cmd_msg->tx_len[i]; j++) {
-			DDPMSG(
-				"send lcm type[%d]=0x%x, tx_buf[%d]--byte:%d,val:0x%x\n",
-				i, cmd_msg->type[i], i, j,
-				*(char *)(cmd_msg->tx_buf[i] + j));
-		}
-	}
-
-	ret = mtk_ddic_dsi_send_cmd(cmd_msg, true);
-	if (ret != 0) {
-		DDPPR_ERR("mtk_ddic_dsi_send_cmd error\n");
-		goto  done;
-	}
-done:
-	vfree(cmd_msg);
-
-	DDPMSG("%s end -\n", __func__);
-}
-
-
 void ddic_dsi_send_switch_pgt(unsigned int cmd_num, u8 addr,
 	u8 val1, u8 val2, u8 val3, u8 val4, u8 val5, u8 val6)
 {
@@ -1473,67 +1609,6 @@ void ddic_dsi_read_cmd_test(unsigned int case_num)
 	}
 
 	ret_dlen = cmd_msg->rx_len[0];
-	DDPMSG("read lcm addr:0x%x--dlen:%d\n",
-		*(char *)(cmd_msg->tx_buf[0]), ret_dlen);
-	for (j = 0; j < ret_dlen; j++) {
-		DDPMSG("read lcm addr:0x%x--byte:%d,val:0x%x\n",
-			*(char *)(cmd_msg->tx_buf[0]), j,
-			*(char *)(cmd_msg->rx_buf[0] + j));
-	}
-
-done:
-	vfree(cmd_msg->rx_buf[0]);
-	vfree(cmd_msg);
-
-	DDPMSG("%s end -\n", __func__);
-}
-
-/* adb shell "echo 0x06 0x01 0x0a > /proc/motUtil"
-* adb shell "cat /proc/motUtil"
-* adb shell "echo 0x06 0x02 0x52 > /proc/motUtil"
-* adb shell "cat /proc/motUtil"
-*
-* 0x06   0x02       0x52
-* TYPE   LENGTH   REG
-*/
-void ddic_dsi_read_cmd_motUtil(char input[])
-{
-	unsigned int j = 0;
-	unsigned int ret_dlen = 0;
-	int ret;
-	struct mtk_ddic_dsi_msg *cmd_msg =
-		vmalloc(sizeof(struct mtk_ddic_dsi_msg));
-	u8 tx[10] = {0};
-
-	DDPMSG("%s start case_num:%s\n", __func__, input);
-
-	if (!cmd_msg) {
-		DDPPR_ERR("cmd msg is NULL\n");
-		return;
-	}
-	memset(cmd_msg, 0, sizeof(struct mtk_ddic_dsi_msg));
-
-	cmd_msg->channel = 0;
-	cmd_msg->tx_cmd_num = 1;
-	cmd_msg->type[0] = input[0];
-	tx[0] = input[2];
-	cmd_msg->tx_buf[0] = tx;
-	cmd_msg->tx_len[0] = 1;
-
-	cmd_msg->rx_cmd_num = 1;
-	cmd_msg->rx_buf[0] = vmalloc(256 * sizeof(unsigned char));
-	memset(cmd_msg->rx_buf[0], 0, 256);
-	cmd_msg->rx_len[0] = input[1];
-	read_dlen = input[1];
-
-	ret = mtk_ddic_dsi_read_cmd(cmd_msg);
-	if (ret != 0) {
-		DDPPR_ERR("%s error\n", __func__);
-		goto  done;
-	}
-
-	ret_dlen = cmd_msg->rx_len[0];
-	strncpy(dcs_read, cmd_msg->rx_buf[0], ret_dlen);
 	DDPMSG("read lcm addr:0x%x--dlen:%d\n",
 		*(char *)(cmd_msg->tx_buf[0]), ret_dlen);
 	for (j = 0; j < ret_dlen; j++) {
@@ -2140,6 +2215,64 @@ int mtk_drm_ioctl_pq_get_persist_property(struct drm_device *dev, void *data,
 	return ret;
 }
 
+static void mtk_get_panels_info(void)
+{
+	struct mtk_drm_private *priv = drm_dev->dev_private;
+	struct mtk_ddp_comp *output_comp;
+	struct mtk_drm_panels_info *panel_ctx;
+	int i;
+
+	output_comp = mtk_ddp_comp_request_output(to_mtk_crtc(priv->crtc[0]));
+	panel_ctx = vzalloc(sizeof(struct mtk_drm_panels_info));
+	if (!panel_ctx) {
+		DDPPR_ERR("%s panel_info alloc failed\n", __func__);
+		return;
+	}
+
+	/* notify driver user does not know how many DSI connector exist */
+	panel_ctx->connector_cnt = -1;
+
+	mtk_ddp_comp_io_cmd(output_comp, NULL, GET_ALL_CONNECTOR_PANEL_NAME, panel_ctx);
+
+	DDPMSG("get panel_info_ctx connector_cnt %d default %d\n",
+			panel_ctx->connector_cnt, panel_ctx->default_connector_id);
+	if (panel_ctx->connector_cnt <= 0) {
+		DDPPR_ERR("%s invalid connector cnt\n", __func__);
+		goto out2;
+	}
+
+	panel_ctx->connector_obj_id = vmalloc(sizeof(unsigned int) * panel_ctx->connector_cnt);
+	panel_ctx->panel_name = vmalloc(sizeof(char *) * panel_ctx->connector_cnt);
+	if (!panel_ctx->connector_obj_id || !panel_ctx->panel_name) {
+		DDPPR_ERR("%s ojb_id or panel_name alloc fail\n", __func__);
+		goto out1;
+	}
+
+	for (i = 0 ; i < panel_ctx->connector_cnt ; ++i) {
+		panel_ctx->panel_name[i] = vmalloc(sizeof(char) * 64);
+		if (!panel_ctx->panel_name[i]) {
+			DDPPR_ERR("%s alloc panel_name fail\n", __func__);
+			goto out0;
+		}
+	}
+
+	mtk_ddp_comp_io_cmd(output_comp, NULL, GET_ALL_CONNECTOR_PANEL_NAME, panel_ctx);
+
+	for (i = 0 ; i < panel_ctx->connector_cnt ; ++i)
+		DDPMSG("%s get connector_id %d, panel_name %s, panel_id %u\n", __func__,
+				panel_ctx->connector_obj_id[i], panel_ctx->panel_name[i],
+				panel_ctx->panel_id);
+
+out0:
+	for (i = 0 ; i < panel_ctx->connector_cnt ; ++i)
+		vfree(panel_ctx->panel_name[i]);
+out1:
+	vfree(panel_ctx->panel_name);
+	vfree(panel_ctx->connector_obj_id);
+out2:
+	vfree(panel_ctx);
+}
+
 static void process_dbg_opt(const char *opt)
 {
 	DDPINFO("display_debug cmd %s\n", opt);
@@ -2153,16 +2286,13 @@ static void process_dbg_opt(const char *opt)
 		/*ex: echo helper:DISP_OPT_BYPASS_OVL,0 > /d/mtkfb */
 		char option[100] = "";
 		char *tmp;
-		int value, i, limited;
+		int value, i;
 		enum MTK_DRM_HELPER_OPT helper_opt;
 		struct mtk_drm_private *priv = drm_dev->dev_private;
 		int ret;
 
 		tmp = (char *)(opt + 7);
-		limited = strlen(tmp);
 		for (i = 0; i < 99; i++) {    /* option[99] should be '\0' to aviod oob */
-			if (i >= limited)
-				return;
 			if (tmp[i] != ',' && tmp[i] != ' ')
 				option[i] = tmp[i];
 			else
@@ -2274,6 +2404,78 @@ static void process_dbg_opt(const char *opt)
 			mtk_drm_crtc_analysis(crtc);
 			mtk_drm_crtc_dump(crtc);
 		}
+	} else if (is_bdg_supported() && strncmp(opt, "bdg_dump", 8) == 0) {
+		bdg_dsi_dump_reg(DISP_BDG_DSI0);
+	} else if (is_bdg_supported() && strncmp(opt, "set_data_rate:", 14) == 0) {
+		unsigned int data_rate = 0;
+		int ret = -1;
+
+		ret = sscanf(opt, "set_data_rate:%d\n",
+			&data_rate);
+		if (ret != 1) {
+			DDPMSG("[error]%d error to parse set_data_rate cmd %s\n",
+				__LINE__, opt);
+			return;
+		}
+
+		set_bdg_data_rate(data_rate);
+
+	} else if (is_bdg_supported() && !strncmp(opt, "set_mask_spi:", 13)) {
+		unsigned int addr = 0, val = 0, mask = 0;
+		int ret = -1;
+
+		ret = sscanf(opt, "set_mask_spi:addr=0x%x,mask=0x%x,val=0x%x\n",
+			&addr, &mask, &val);
+		if (ret != 3) {
+			DDPMSG("[error]%d error to parse set_mt6382_spi cmd %s\n",
+				__LINE__, opt);
+			return;
+		}
+
+		ret = mtk_spi_mask_write(addr, mask, val);
+		if (ret < 0) {
+			DDPMSG("[error]write mt6382 fail,addr:0x%x, val:0x%x\n",
+				addr, val);
+			return;
+		}
+	} else if (is_bdg_supported() && !strncmp(opt, "set_mt6382_spi:", 15)) {
+		unsigned int addr = 0, val = 0;
+		int ret = -1;
+
+		ret = sscanf(opt, "set_mt6382_spi:addr=0x%x,val=0x%x\n",
+			&addr, &val);
+		if (ret != 2) {
+			DDPMSG("[error]%d error to parse set_mt6382_spi cmd %s\n",
+				__LINE__, opt);
+			return;
+		}
+
+		ret = mtk_spi_write(addr, val);
+		if (ret < 0) {
+			DDPMSG("[error]write mt6382 fail,addr:0x%x, val:0x%x\n",
+				addr, val);
+			return;
+		}
+
+	} else if (is_bdg_supported() && !strncmp(opt, "read_mt6382_spi:", 16)) {
+		unsigned int addr = 0, val = 0;
+		int ret = -1;
+
+		ret = sscanf(opt, "read_mt6382_spi:addr=0x%x\n", &addr);
+		if (ret != 1) {
+			DDPMSG("[error]%d error to parse read_mt6382_spi cmd %s\n",
+				__LINE__, opt);
+			return;
+		}
+
+		val = mtk_spi_read(addr);
+		DDPMSG("mt6382 read addr:0x%08x, val:0x%08x\n", addr, val);
+
+	} else if (is_bdg_supported() && strncmp(opt, "check", 5) == 0) {
+		if (check_stopstate(NULL) == 0)
+			bdg_tx_start(DISP_BDG_DSI0, NULL);
+		mdelay(100);
+		return;
 	} else if (strncmp(opt, "repaint", 7) == 0) {
 		drm_trigger_repaint(DRM_REPAINT_FOR_IDLE, drm_dev);
 	} else if (strncmp(opt, "dalprintf", 9) == 0) {
@@ -2394,6 +2596,45 @@ static void process_dbg_opt(const char *opt)
 		enable = 1;
 		comp->funcs->io_cmd(comp, NULL, LCM_RESET, &enable);
 		DDPMSG("%s, lcm reset\n", __func__);
+	} else if (strncmp(opt, "lcm1_reset", 10) == 0) {
+		struct mtk_ddp_comp *comp;
+		struct drm_crtc *crtc;
+		struct mtk_drm_crtc *mtk_crtc;
+		struct mtk_drm_private *priv = (drm_dev) ? drm_dev->dev_private : NULL;
+		int enable, i;
+
+		if (IS_ERR_OR_NULL(priv)) {
+			DDPPR_ERR("%s:%d invalid priv\n", __func__, __LINE__);
+			return;
+		}
+
+		/* debug_cmd lcm0_reset handle crtc0 already */
+		for (i = 1 ; i < MAX_CRTC ; ++i) {
+			crtc = priv->crtc[i];
+			if (!crtc) {
+				DDPPR_ERR("find crtc fail\n");
+				return;
+			}
+
+			mtk_crtc = to_mtk_crtc(crtc);
+			comp = mtk_ddp_comp_request_output(mtk_crtc);
+			if (comp && mtk_ddp_comp_get_type(comp->id) == MTK_DSI)
+				break;
+		}
+
+		if (!comp || !comp->funcs || !comp->funcs->io_cmd) {
+			DDPINFO("cannot find output component\n");
+			return;
+		}
+		enable = 1;
+		comp->funcs->io_cmd(comp, NULL, LCM_RESET, &enable);
+		msleep(20);
+		enable = 0;
+		comp->funcs->io_cmd(comp, NULL, LCM_RESET, &enable);
+		msleep(20);
+		enable = 1;
+		comp->funcs->io_cmd(comp, NULL, LCM_RESET, &enable);
+		DDPMSG("%s, lcm1 reset\n", __func__);
 	} else if (strncmp(opt, "backlight:", 10) == 0) {
 		unsigned int level;
 		int ret;
@@ -2406,6 +2647,19 @@ static void process_dbg_opt(const char *opt)
 		}
 
 		mtkfb_set_backlight_level(level);
+	} else if (strncmp(opt, "conn_backlight:", 15) == 0) {
+		unsigned int level;
+		unsigned int conn_id;
+		int ret;
+
+		ret = sscanf(opt, "conn_backlight:%u,%u\n", &conn_id, &level);
+		if (ret != 2) {
+			DDPPR_ERR("%d error to parse cmd %s\n",
+				__LINE__, opt);
+			return;
+		}
+
+		mtk_drm_set_conn_backlight_level(conn_id, level);
 	} else if (!strncmp(opt, "aod_bl:", 7)) {
 		unsigned int level;
 		int ret;
@@ -2590,8 +2844,8 @@ static void process_dbg_opt(const char *opt)
 
 		ddic_dsi_read_cmd_test(case_num);
 	} else if (strncmp(opt, "ddic_page_switch:", 17) == 0) {
-		u8 addr, val1, val2, val3;
-		u8 val4, val5, val6;
+		unsigned int addr, val1, val2, val3;
+		unsigned int val4, val5, val6;
 		unsigned int cmd_num, ret;
 
 		ret = sscanf(opt, "ddic_page_switch:%d,%x,%x,%x,%x,%x,%x,%x\n",
@@ -2606,10 +2860,10 @@ static void process_dbg_opt(const char *opt)
 
 		DDPMSG("ddic_spr_switch:%d\n", cmd_num);
 
-		ddic_dsi_send_switch_pgt(cmd_num, addr, val1, val2, val3,
-			val4, val5, val6);
+		ddic_dsi_send_switch_pgt(cmd_num, (u8)addr, (u8)val1,
+			(u8)val2, (u8)val3, (u8)val4, (u8)val5, (u8)val6);
 	} else if (strncmp(opt, "read_cm:", 8) == 0) {
-		u8 addr;
+		unsigned int addr;
 		unsigned int ret;
 
 		ret = sscanf(opt, "read_cm:%x\n", &addr);
@@ -2619,7 +2873,7 @@ static void process_dbg_opt(const char *opt)
 			return;
 		}
 		DDPMSG("read_cm:%d\n", addr);
-		ddic_dsi_read_cm_cmd(addr);
+		ddic_dsi_read_cm_cmd((u8)addr);
 	} else if (strncmp(opt, "ap_spr_cm_bypass:", 17) == 0) {
 		unsigned int spr_bypass, cm_bypass, ret;
 
@@ -2962,6 +3216,10 @@ static void process_dbg_opt(const char *opt)
 		unsigned int fake_hdr_en = 0;
 		struct drm_crtc *crtc;
 		struct mtk_panel_params *params = NULL;
+		struct mtk_drm_crtc *mtk_crtc;
+		struct mtk_ddp_comp *output_comp;
+		struct mtk_crtc_state *state;
+		unsigned int mode_cont, cur_mode_idx, i;
 		int ret;
 
 		ret = sscanf(opt, "fake_wcg:%u\n", &fake_hdr_en);
@@ -2977,15 +3235,32 @@ static void process_dbg_opt(const char *opt)
 			DDPPR_ERR("find crtc fail\n");
 			return;
 		}
+		mtk_crtc = to_mtk_crtc(crtc);
 
-		params = mtk_drm_get_lcm_ext_params(crtc);
-		if (!params) {
-			DDPPR_ERR("[Fake HDR] find lcm ext fail\n");
+		state = to_mtk_crtc_state(mtk_crtc->base.state);
+		cur_mode_idx = state->prop_val[CRTC_PROP_DISP_MODE_IDX];
+		output_comp = mtk_ddp_comp_request_output(mtk_crtc);
+		if (!output_comp) {
+			DDPMSG("output_comp is null!\n");
 			return;
 		}
+		mtk_ddp_comp_io_cmd(output_comp, NULL, DSI_GET_MODE_CONT, &mode_cont);
 
-		params->lcm_color_mode = (fake_hdr_en) ?
-			MTK_DRM_COLOR_MODE_DISPLAY_P3 : MTK_DRM_COLOR_MODE_NATIVE;
+		DDPINFO("set panel color_mode info: mode_cont = %d, cur_mode_idx = %d\n",
+							mode_cont, cur_mode_idx);
+
+		for (i = 0; i < mode_cont; i++) {
+			mtk_ddp_comp_io_cmd(output_comp, NULL, DSI_SET_PANEL_PARAMS_BY_IDX, &i);
+			params = mtk_drm_get_lcm_ext_params(crtc);
+			if (!params) {
+				DDPPR_ERR("[Fake HDR] find lcm ext fail[%d]\n", i);
+				return;
+			}
+			params->lcm_color_mode = (fake_hdr_en) ?
+				MTK_DRM_COLOR_MODE_DISPLAY_P3 : MTK_DRM_COLOR_MODE_NATIVE;
+		}
+		mtk_ddp_comp_io_cmd(output_comp, NULL, DSI_SET_PANEL_PARAMS_BY_IDX, &cur_mode_idx);
+
 		DDPINFO("set panel color_mode to %d\n", params->lcm_color_mode);
 	} else if (strncmp(opt, "esd_check", 9) == 0) {
 		unsigned int esd_check_en = 0;
@@ -3124,6 +3399,20 @@ static void process_dbg_opt(const char *opt)
 
 		if (mtk_crtc)
 			mtk_crtc->mml_cmd_ir = mml_cmd_ir;
+	} else if (strncmp(opt, "get_panels_info", 15) == 0) {
+		mtk_get_panels_info();
+	} else if (strncmp(opt, "conn_obj_id", 11) == 0) {
+		unsigned int value;
+		int ret;
+
+		ret = sscanf(opt, "conn_obj_id:%u\n", &value);
+		if (ret != 1) {
+			DDPPR_ERR("conn_obj_id scan fail, ret=%d\n", ret);
+			return;
+		}
+
+		ret = mtk_drm_get_conn_obj_id_from_idx(value, 0);
+		DDPINFO("disp_idx %u, conn_obj_id %d\n", value, ret);
 	}
 }
 
@@ -3192,141 +3481,14 @@ static ssize_t debug_write(struct file *file, const char __user *ubuf,
 	return ret;
 }
 
-static ssize_t motUtil_string2num(const char __user *buf,
-					size_t count, char buffer[])
-{
-	char *input, *input_copy, *token, *input_dup = NULL;
-	const char *delim =" ";
-	u32 buf_size = 0;
-	int rc=0, strtoint;
-
-	/*copy the data from user space*/
-	input = kmalloc(count + 1, GFP_KERNEL);
-	if (!input)
-		return -ENOMEM;
-
-	if (copy_from_user(input, buf, count)) {
-		DDPPR_ERR("copy from user failed\n");
-		rc = -EFAULT;
-		goto end;
-	}
-	input[count]='\0';
-	DDPMSG("input_cmd = %s\n", input);
-
-	input_copy = kstrdup(input, GFP_KERNEL);
-	if (!input_copy) {
-		rc = -ENOMEM;
-		goto end;
-	}
-
-	input_dup = input_copy,
-	token = strsep(&input_copy, delim);
-	while (token) {
-		rc = kstrtoint(token, 0, &strtoint);
-		if (rc) {
-			rc = -EIO;
-			DDPPR_ERR("input buffer conversion failed\n");
-			goto end;
-		}
-
-		if (buf_size >= MAX_CMD_PAYLOAD_SIZE) {
-			DDPPR_ERR("buffer size exceeding the limit %d\n",
-					MAX_CMD_PAYLOAD_SIZE);
-			goto end;
-		}
-
-		buffer[buf_size++] = (strtoint & 0xff);
-		token = strsep(&input_copy, delim);
-	}
-
-	DDPMSG("command packet size in bytes: %u\n", buf_size);
-	rc = buf_size;
-end:
-	kfree(input_dup);
-	kfree(input);
-
-	return rc;
-}
-
-static int motUtil_open(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-
-	return 0;
-}
-static ssize_t motUtil_read(struct file *file, char __user *ubuf, size_t count,
-			  loff_t *ppos)
-{
-	int blen = 0, i;
-	char buffer[MAX_CMD_PAYLOAD_SIZE];
-
-	if (read_dlen > 0) {
-		blen = snprintf(buffer, 16, "motUtil_read: ");
-		for (i = 0; i < read_dlen; i ++)
-				blen += snprintf((buffer + blen) , 6, "0x%02x ",
-					dcs_read[i]);
-
-		blen += snprintf((buffer + blen), 4, "\n");
-	}else
-		DDPPR_ERR("motUtil failed to read from panel\n");
-
-        if (blen <= 0) {
-                DDPPR_ERR("snprintf failed, blen %d\n", blen);
-                return 0;
-        }
-	buffer[blen+1] = '\0';
-
-	DDPMSG("%s, %d, %d, %d %d\n", buffer, blen, read_dlen, count, *ppos);
-
-        return simple_read_from_buffer(ubuf, count, ppos, buffer, blen);
-}
-
-static ssize_t motUtil_write(struct file *file, const char __user *ubuf,
-			   size_t count, loff_t *ppos)
-{
-	u32 buf_size = 0;
-	char buffer[MAX_CMD_PAYLOAD_SIZE];
-	int ret = 0;
-
-	if (*ppos) {
-		DDPMSG("invalid argument(s)\n");
-		ret = -EINVAL;
-		goto end;
-	}
-
-	buf_size = motUtil_string2num(ubuf, count, buffer);
-	if (buf_size <= 0){
-		DDPMSG("invalid input\n");
-		ret = -EINVAL;
-		goto end;
-	}
-	/* buffer[0] DSC data type such as 0x06, 0x39, 0x15, 0x05 */
-	if (buffer[0] == DCS_READ_NO_PARAM)
-		ddic_dsi_read_cmd_motUtil(buffer);
-	else
-		ddic_dsi_send_cmd_motUtil(buffer);
-end:
-	return count;
-}
-
 static const struct file_operations debug_fops = {
 	.read = debug_read, .write = debug_write, .open = debug_open,
-};
-
-static const struct file_operations motUtil_fops = {
-	.read = motUtil_read, .write = motUtil_write, .open = motUtil_open,
 };
 
 static const struct proc_ops debug_proc_fops = {
 	.proc_read = debug_read,
 	.proc_write = debug_write,
 	.proc_open = debug_open,
-};
-
-static const struct proc_ops motUtil_proc_fops = {
-	.proc_read = motUtil_read,
-	.proc_write = motUtil_write,
-	.proc_open = motUtil_open,
 };
 
 static int idletime_set(void *data, u64 val)
@@ -3855,9 +4017,6 @@ void disp_dbg_probe(void)
 	mtkfb_dbgfs = debugfs_create_file("mtkfb", S_IFREG | 0440, NULL,
 					  NULL, &debug_fops);
 
-	motUtil_dbgfs = debugfs_create_file("motUtil", S_IFREG | 0440, NULL,
-					  NULL, &motUtil_fops);
-
 	d_folder = debugfs_create_dir("displowpower", NULL);
 	if (d_folder) {
 		d_file = debugfs_create_file("idletime", S_IFREG | 0644,
@@ -3891,14 +4050,6 @@ void disp_dbg_probe(void)
 		DDPPR_ERR("[%s %d]failed to create mtkfb in /proc/disp_ddp\n",
 			__func__, __LINE__);
 		goto out;
-	}
-
-	motUtil_procfs = proc_create("motUtil", S_IFREG | 0444,
-				   NULL,
-				   &motUtil_proc_fops);
-	if (!motUtil_procfs) {
-		DDPPR_ERR("[%s %d]failed to create motUtil in /proc/disp_ddp\n",
-			__func__, __LINE__);
 	}
 
 	disp_lowpower_proc = proc_mkdir("displowpower", NULL);
@@ -3964,16 +4115,49 @@ out:
 
 void disp_dbg_init(struct drm_device *dev)
 {
+	int ret = 0;
+	struct mtk_drm_private *priv;
+
 	if (IS_ERR_OR_NULL(dev))
 		DDPMSG("%s, disp debug init with invalid dev\n", __func__);
 	else
 		DDPMSG("%s, disp debug init\n", __func__);
 	drm_dev = dev;
 	init_completion(&cwb_cmp);
+
+	priv = drm_dev->dev_private;
+	if (IS_ERR_OR_NULL(priv)) {
+		DDPMSG("%s, invalid priv\n", __func__);
+		return;
+	}
+	/* SW workaround.
+	 * Polling RDMA output line isn't 0 && RDMA status is run,
+	 * before switching mm clock mux in cmd mode.
+	 */
+	if (priv->data->mmsys_id == MMSYS_MT6768) {
+		nb.notifier_call = mtk_disp_pd_callback;
+		ret = dev_pm_genpd_add_notifier(dev->dev, &nb);
+		if (ret)
+			DDPMSG("dev_pm_genpd_add_notifier disp register fail!\n");
+		else
+			mtk_mux_set_quick_switch_chk_cb(
+				polling_rdma_output_line_is_not_zero);
+	}
 }
 
 void disp_dbg_deinit(void)
 {
+	int ret = 0;
+	struct mtk_drm_private *priv;
+
+	priv = drm_dev->dev_private;
+	if (!IS_ERR_OR_NULL(priv) && priv->data->mmsys_id == MMSYS_MT6768) {
+		ret = dev_pm_genpd_remove_notifier(drm_dev->dev);
+		if (ret)
+			DDPMSG("dev_pm_genpd_remove_notifier disp unregister fail!\n");
+		mtk_mux_set_quick_switch_chk_cb(NULL);
+	}
+
 	if (debug_buffer)
 		vfree(debug_buffer);
 #if IS_ENABLED(CONFIG_DEBUG_FS)
@@ -4007,111 +4191,4 @@ void get_disp_dbg_buffer(unsigned long *addr, unsigned long *size,
 		*size = 0;
 		*start = 0;
 	}
-}
-
-int mtk_read_ddic_cellid(unsigned char *cellid, int reg, int offset_reg, int len)
-{
-	struct mtk_ddic_dsi_msg *cmd_msg =
-		vmalloc(sizeof(struct mtk_ddic_dsi_msg));
-	u8 tx[10] = {0};
-	int i,j,k;
-	unsigned int ret_dlen = 0;
-	int ret=0;
-	int dsi_read_max = 8;	//MTK platform only support 10 byte each read.
-	int dsi_read_pkg;
-
-	if (!cmd_msg) {
-		DDPPR_ERR("cmd msg is NULL\n");
-		return ret_dlen;
-	}
-
-	memset(cmd_msg, 0, sizeof(struct mtk_ddic_dsi_msg));
-
-	cmd_msg->rx_buf[0] = kmalloc(32 * sizeof(unsigned char),
-		GFP_ATOMIC);
-	if (!cmd_msg->rx_buf[0]) {
-		DDPPR_ERR("cmd msg rx_buf is NULL\n");
-		goto  done;
-	}
-
-
-	dsi_read_pkg = len/dsi_read_max;
-	if(len%dsi_read_max)
-		dsi_read_pkg += 1;
-
-	reading_cellid = true;
-	for(k = 0; k < dsi_read_pkg; k++) {
-		if(k) {
-			cmd_msg->channel = 0;
-			cmd_msg->flags |= MIPI_DSI_MSG_USE_LPM;
-			cmd_msg->tx_cmd_num = 1;
-			cmd_msg->type[0] = 0x15;
-			tx[0] = offset_reg;
-			tx[1] = dsi_read_max*k;
-			cmd_msg->tx_buf[0] = tx;
-			cmd_msg->tx_len[0] = 2;
-
-			DDPMSG("send lcm tx_cmd_num:%d\n", (int)cmd_msg->tx_cmd_num);
-			for (i = 0; i < (int)cmd_msg->tx_cmd_num; i++) {
-				DDPMSG("send lcm tx_len[%d]=%d\n",
-					i, (int)cmd_msg->tx_len[i]);
-				for (j = 0; j < (int)cmd_msg->tx_len[i]; j++) {
-					DDPMSG(
-						"send lcm type[%d]=0x%x, tx_buf[%d]--byte:%d,val:0x%x\n",
-						i, cmd_msg->type[i], i, j,
-						*(char *)(cmd_msg->tx_buf[i] + j));
-				}
-			}
-
-			ret = mtk_ddic_dsi_send_cmd(cmd_msg, true);
-			if (ret != 0) {
-				DDPPR_ERR("mtk_ddic_dsi_send_cmd error\n");
-				goto  dsi_error;
-			}
-		}
-
-		/* Read 0x0A = 0x1C */
-		cmd_msg->channel = 0;
-		cmd_msg->flags = 0;
-		cmd_msg->tx_cmd_num = 1;
-		cmd_msg->type[0] = 0x06;
-		tx[0] = reg;
-		cmd_msg->tx_buf[0] = tx;
-		cmd_msg->tx_len[0] = 1;
-
-		cmd_msg->rx_cmd_num = 1;
-		if(len > dsi_read_max)
-			cmd_msg->rx_len[0] = dsi_read_max;
-		else
-			cmd_msg->rx_len[0] = len;
-
-
-		ret = mtk_ddic_dsi_read_cmd(cmd_msg);
-		if (ret != 0) {
-			DDPPR_ERR("%s error\n", __func__);
-			goto  dsi_error;
-		}
-
-		for (i = 0; i < cmd_msg->rx_cmd_num; i++) {
-			ret_dlen = cmd_msg->rx_len[i];
-			DDPMSG("read lcm addr:0x%x--dlen:%d--cmd_idx:%d\n",
-				*(char *)(cmd_msg->tx_buf[i]), ret_dlen, i);
-			for (j = 0; j < ret_dlen; j++) {
-				DDPMSG("read lcm addr:0x%x--byte:%d,val:0x%x\n",
-					*(char *)(cmd_msg->tx_buf[i]), j,
-					*(char *)(cmd_msg->rx_buf[i] + j));
-			}
-		}
-
-		memcpy(&cellid[dsi_read_max*k], cmd_msg->rx_buf[0], ret_dlen);
-
-		len -= ret_dlen;
-	}
-
-dsi_error:
-	kfree(cmd_msg->rx_buf[0]);
-done:
-	vfree(cmd_msg);
-	reading_cellid = false;
-	return ret_dlen;
 }

@@ -1,0 +1,23 @@
+/*[TN.NJDC] display overlay file.start*/
+&mtk_leds {
+	compatible = "mediatek,disp-leds";
+	backlight {
+		led_mode = <4>;
+		label = "lcd-backlight";
+		led-bits = <8>;
+		trans-bits = <11>;
+		max-brightness = <255>;
+		max-hw-brightness = <2047>;
+		default-state = "on";
+	};
+};
+
+&odm {
+	led6 {
+		compatible = "mediatek,lcd-backlight";
+		led_mode = <4>;
+		data = <1>;
+		pwm_config = <0 1 0 0 0>;
+	};
+};
+/*[TN.NJDC] display overlay file.end*/

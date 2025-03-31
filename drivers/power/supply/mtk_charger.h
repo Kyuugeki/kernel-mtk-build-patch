@@ -12,7 +12,10 @@
 #include "mtk_charger_algorithm_class.h"
 #include <linux/power_supply.h>
 #include "mtk_smartcharging.h"
-#include <linux/power/moto_chg_tcmd.h>
+
+/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+#define QC_CHARGING_MODE 1
+/*TN End modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
 
 #define CHARGING_INTERVAL 10
 #define CHARGING_FULL_INTERVAL 20
@@ -60,15 +63,12 @@ struct charger_data;
 #define AC_CHARGER_INPUT_CURRENT		3200000
 #define NON_STD_AC_CHARGER_CURRENT		500000
 #define CHARGING_HOST_CHARGER_CURRENT		650000
-/*wireless input current and charging current*/
-#define WIRELESS_FACTORY_MAX_CURRENT			3000000
-#define WIRELESS_FACTORY_MAX_INPUT_CURRENT		1150000
-
-/*wireless charging power*/
-#define WLS_RX_CAP_15W 15
-#define WLS_RX_CAP_10W 10
-#define WLS_RX_CAP_8W 8
-#define WLS_RX_CAP_5W 5
+/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+#if IS_ENABLED(QC_CHARGING_MODE)
+#define QC_CHARGER_CURRENT			3500000
+#define QC_CHARGER_INPUT_CURRENT		3200000
+#endif
+/*TN End modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
 
 /* dynamic mivr */
 #define V_CHARGER_MIN_1 4400000 /* 4.4 V */
@@ -95,35 +95,6 @@ struct charger_data;
 #define MAX_CHARGE_TEMP_MINUS_X_DEGREE	47
 
 #define MAX_ALG_NO 10
-#define DEFAULT_ALG 0
-
-enum mmi_mux_channel {
-	MMI_MUX_CHANNEL_NONE = 0,
-	MMI_MUX_CHANNEL_TYPEC_CHG,
-	MMI_MUX_CHANNEL_TYPEC_OTG,
-	MMI_MUX_CHANNEL_WLC_CHG,
-	MMI_MUX_CHANNEL_WLC_OTG,
-	MMI_MUX_CHANNEL_TYPEC_CHG_WLC_OTG,
-	MMI_MUX_CHANNEL_TYPEC_CHG_WLC_CHG,
-	MMI_MUX_CHANNEL_TYPEC_OTG_WLC_CHG,
-	MMI_MUX_CHANNEL_TYPEC_OTG_WLC_OTG,
-	MMI_MUX_CHANNEL_WLC_FW_UPDATE,
-	MMI_MUX_CHANNEL_WLC_FACTORY_TEST,
-	MMI_MUX_CHANNEL_MAX
-};
-
-struct mmi_mux_chan {
-	enum mmi_mux_channel chan;
-	bool on;
-};
-
-struct mmi_mux_configure {
-	u32 typec_mos;
-	u32 wls_mos;
-	bool wls_boost_en;
-	bool wls_loadswtich_en;
-	bool wls_chip_en;
-};
 
 enum bat_temp_state_enum {
 	BAT_TEMP_LOW = 0,
@@ -161,9 +132,9 @@ struct battery_thermal_protection_data {
 #define TEMP_T2_THRES_PLUS_X_DEGREE 16
 #define TEMP_T1_THRES  0
 #define TEMP_T1_THRES_PLUS_X_DEGREE 6
-#define TEMP_T0_THRES  0
-#define TEMP_T0_THRES_PLUS_X_DEGREE  0
-#define TEMP_NEG_10_THRES 0
+#define TEMP_T0_THRES  -20
+#define TEMP_T0_THRES_PLUS_X_DEGREE -18
+#define TEMP_NEG_10_THRES -20
 
 /*
  * Software JEITA
@@ -191,7 +162,7 @@ struct sw_jeita_data {
 };
 
 struct mtk_charger_algorithm {
-	int (*do_mux)(struct mtk_charger *info, enum mmi_mux_channel channel, bool on);
+
 	int (*do_algorithm)(struct mtk_charger *info);
 	int (*enable_charging)(struct mtk_charger *info, bool en);
 	int (*do_event)(struct notifier_block *nb, unsigned long ev, void *v);
@@ -233,6 +204,28 @@ struct charger_custom_data {
 	int temp_t0_thres_plus_x_degree;
 	int temp_neg_10_thres;
 
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1548*/
+	int jeita_temp_above_t4_icurrent;
+	int jeita_temp_t3_to_t4_icurrent;
+	int jeita_temp_t2_to_t3_icurrent;
+	int jeita_temp_t1_to_t2_icurrent;
+	int jeita_temp_t0_to_t1_icurrent;
+	int jeita_temp_below_t0_icurrent;
+/*TN end modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1548*/
+
+/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+#if IS_ENABLED(QC_CHARGING_MODE)
+	int qc_temp_above_t4_icurrent;
+	int qc_temp_t3_to_t4_icurrent;
+	int qc_temp_t2_to_t3_icurrent;
+	int qc_temp_t1_to_t2_icurrent;
+	int qc_temp_t0_to_t1_icurrent;
+	int qc_temp_below_t0_icurrent;
+	int qc_charging_current_limit;
+	int qc_input_current_limit;
+#endif
+/*TN end modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+
 	/* battery temperature protection */
 	int mtk_temperature_recharge_support;
 	int max_charge_temp;
@@ -245,9 +238,6 @@ struct charger_custom_data {
 	int min_charger_voltage_2;
 	int max_dmivr_charger_current;
 
-	/*wireless charger*/
-	int wireless_factory_max_current;
-	int wireless_factory_max_input_current;
 };
 
 struct charger_data {
@@ -257,155 +247,20 @@ struct charger_data {
 	int force_charging_current;
 	int thermal_input_current_limit;
 	int thermal_charging_current_limit;
+	bool thermal_throttle_record;
 	int disable_charging_count;
 	int input_current_limit_by_aicl;
 	int junction_temp_min;
 	int junction_temp_max;
-	int moto_chg_tcmd_ichg;
-	int moto_chg_tcmd_ibat;
-#if defined(CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT) || defined(CONFIG_MOTO_CHARGER_SGM415XX)
-	int cp_ichg_limit;
+
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1548*/
+	int temp_charging_current_limit;
+#if IS_ENABLED(QC_CHARGING_MODE)
+	int qc_temp_charging_current_limit;
 #endif
+/*TN end modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1548*/
+
 };
-
-/*moto mmi Functionality start*/
-struct mmi_ffc_zone  {
-	int		temp;
-	int		ffc_max_mv;
-	int		ffc_chg_iterm;
-};
-
-struct mmi_cycle_cv_steps {
-	int		cycle;
-	int		delta_cv_mv;
-};
-
-struct mmi_temp_zone {
-	int		temp_c;
-	int		norm_mv;
-	int		fcc_max_ma;
-	int		fcc_norm_ma;
-};
-
-#define MAX_NUM_STEPS 10
-enum mmi_temp_zones {
-	ZONE_FIRST = 0,
-	/* states 0-9 are reserved for zones */
-	ZONE_LAST = MAX_NUM_STEPS + ZONE_FIRST - 1,
-	ZONE_HOT,
-	ZONE_COLD,
-	ZONE_NONE = 0xFF,
-};
-
-enum mmi_chrg_step {
-	STEP_MAX,
-	STEP_NORM,
-	STEP_FULL,
-	STEP_FLOAT,
-	STEP_DEMO,
-	STEP_STOP,
-	STEP_NONE = 0xFF,
-};
-
-enum charging_limit_modes {
-	CHARGING_LIMIT_OFF,
-	CHARGING_LIMIT_RUN,
-	CHARGING_LIMIT_UNKNOWN,
-};
-
-#ifdef CONFIG_MOTO_CHG_FFC_5V10W_SUPPORT
-typedef enum {
-	CHARGER_FFC_STATE_INITIAL,
-	CHARGER_FFC_STATE_PROBING,
-	CHARGER_FFC_STATE_STANDBY,
-	CHARGER_FFC_STATE_GOREADY,
-	CHARGER_FFC_STATE_RUNNING,
-	CHARGER_FFC_STATE_AVGEXIT,
-	CHARGER_FFC_STATE_FFCDONE,
-	CHARGER_FFC_STATE_INVALID,
-} CHARGER_FFC_STATE_T;
-
-enum {
-	CHARGER_FLAG_INVALID,
-	CHARGER_FLAG_FFC,
-	CHARGER_FLAG_NON_FFC,
-};
-#endif
-
-struct mmi_params {
-	bool			init_done;
-	bool			factory_mode;
-	int			demo_mode;
-	bool			demo_discharging;
-
-	bool			factory_kill_armed;
-
-	/*adaptive charging*/
-	bool adaptive_charging_disable_ichg;
-	bool adaptive_charging_disable_ibat;
-	bool charging_enable_hz;
-	bool battery_charging_disable;
-
-	/* Charge Profile */
-	int			num_temp_zones;
-	struct mmi_temp_zone	*temp_zones;
-	enum mmi_temp_zones	pres_temp_zone;
-	enum mmi_chrg_step	pres_chrg_step;
-	int			chrg_taper_cnt;
-	int			temp_state;
-	int			chrg_iterm;
-	int			back_chrg_iterm;
-
-	int			num_ffc_zones;
-	struct mmi_ffc_zone	*ffc_zones;
-	int			num_cycle_cv_steps;
-	struct mmi_cycle_cv_steps	*cycle_cv_steps;
-
-#ifdef CONFIG_MOTO_CHG_FFC_5V10W_SUPPORT
-	CHARGER_FFC_STATE_T	ffc_state;
-	int			ffc_entry_threshold;
-	int			ffc_exit_threshold;
-	int			ffc_uisoc_threshold;
-	long		ffc_ibat_windowsum;
-	long		ffc_ibat_count;
-	int			ffc_ibat_windowsize;
-	int			ffc_iavg;
-	unsigned long ffc_iavg_update_timestamp;
-#endif
-
-	bool			enable_charging_limit;
-	bool			is_factory_image;
-	enum charging_limit_modes	charging_limit_modes;
-	int			upper_limit_capacity;
-	int			lower_limit_capacity;
-	int			base_fv_mv;
-	int			vfloat_comp_mv;
-	int			batt_health;
-	int			batt_statues;
-	int			max_chrg_temp;
-
-	/*target parameter*/
-	int			target_fv;
-	bool			chg_disable;
-	int			target_fcc;
-	int			target_usb;
-	struct notifier_block	chg_reboot;
-	int			min_therm_current_limit;
-	bool			enable_mux;
-	struct			mmi_mux_chan mux_channel;
-	int			wls_switch_en;
-	int			wls_boost_en;
-	int			charge_rate;
-	unsigned int	active_fast_alg;
-	int			typec_rp_max_current;
-
-	int			pd_pmax_mw;
-	struct adapter_auth_data	apdo_cap;
-	int			pd_cap_max_watt;
-	int			vbus_h;
-	int			vbus_l;
-};
-/*moto mmi Functionality end*/
 
 enum chg_data_idx_enum {
 	CHG1_SETTING,
@@ -414,6 +269,22 @@ enum chg_data_idx_enum {
 	DVCHG2_SETTING,
 	CHGS_SETTING_MAX,
 };
+
+/*TN Begin modified by zhen.liu11/860655 20231018 CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+struct ffc_bat_zone {
+       int temp;
+       int ffc_max_mv;
+       int ffc_chg_iterm;
+};
+
+enum ffc_chrg_step {
+	STEP_NORM,
+	STEP_FULL,
+	STEP_NONE = 0xFF,
+};
+#endif
+/*TN End modified by zhen.liu11/860655 20231018 CR/EKFOGO4G-1548*/
 
 struct mtk_charger {
 	struct platform_device *pdev;
@@ -446,8 +317,12 @@ struct mtk_charger {
 	struct power_supply *psy_dvchg2;
 
 	struct power_supply  *chg_psy;
-	struct power_supply  *wl_psy;
 	struct power_supply  *bat_psy;
+/*TN Begin modified by hao.jia/809321 20231018 CR/EKFOGO4G-1548*/
+#if IS_ENABLED(QC_CHARGING_MODE)
+	struct power_supply *qc_logic_psy;
+#endif
+/*TN End modified by hao.jia/809321 20231018 CR/EKFOGO4G-1548*/
 	struct adapter_device *pd_adapter;
 	struct notifier_block pd_nb;
 	struct mutex pd_lock;
@@ -463,6 +338,10 @@ struct mtk_charger {
 
 	struct mutex cable_out_lock;
 	int cable_out_cnt;
+
+/*TN Begin modified by wenfeng.qi/809603 20241113 CR/EKFOGO4G-10772*/
+	int pe5_charging_mode;
+/*TN End modified by wenfeng.qi/809603 20241113 CR/EKFOGO4G-10772*/
 
 	/* system lock */
 	spinlock_t slock;
@@ -537,6 +416,7 @@ struct mtk_charger {
 
 	/* water detection */
 	bool water_detected;
+	bool record_water_detected;
 
 	bool enable_dynamic_mivr;
 
@@ -548,15 +428,6 @@ struct mtk_charger {
 	unsigned int enable_meta_current_limit;
 
 	struct smartcharging sc;
-
-#ifdef CONFIG_MOTO_CHG_FFC_5V10W_SUPPORT
-	/* 10w ffc */
-	bool ffc_discharging;
-	int ffc_input_current_backup;
-	int ffc_max_fv_mv_backup;
-	struct wakeup_source *ffc_charger_wakelock;
-	struct delayed_work ffc_enable_charge_work;
-#endif
 
 	/*daemon related*/
 	struct sock *daemo_nl_sk;
@@ -571,13 +442,25 @@ struct mtk_charger {
 	bool force_disable_pp[CHG2_SETTING + 1];
 	bool enable_pp[CHG2_SETTING + 1];
 	struct mutex pp_lock[CHG2_SETTING + 1];
-	struct moto_chg_tcmd_client chg_tcmd_client;
-	struct mmi_params	mmi;
-	int wireless_online;
-	struct mutex mmi_mux_lock;
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-	struct tcpc_device *tcpc_dev;
+
+	/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+#if IS_ENABLED(QC_CHARGING_MODE)
+	struct delayed_work hvdcp_work;
+	struct notifier_block qc3_charger_detect_nb;
 #endif
+	/*TN End modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+
+/*TN Begin modified by zhen.liu11/860655 20231018 CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+	struct ffc_bat_zone *ffc_zones;
+	int num_ffc_zones;
+	int chrg_iterm;
+	int pres_chrg_step;
+	int chrg_taper_cnt;
+
+	int target_mv;
+#endif
+/*TN End modified by zhen.liu11/860655 20231018 CR/EKFOGO4G-1548*/
 };
 
 static inline int mtk_chg_alg_notify_call(struct mtk_charger *info,
@@ -624,6 +507,6 @@ extern void _wake_up_charger(struct mtk_charger *info);
 
 /* functions for other */
 extern int mtk_chg_enable_vbus_ovp(bool enable);
-extern void aee_kernel_RT_Monitor_api_factory(void);
+
 
 #endif /* __MTK_CHARGER_H */

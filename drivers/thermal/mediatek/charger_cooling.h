@@ -13,11 +13,7 @@
  *===========================================================
  */
 #define CHARGER_COOLING_UNLIMITED_STATE	(0)
-#ifdef CONFIG_MOTO_THERMAL_CHARGER_STATE_NUM
-#define CHARGER_STATE_NUM CONFIG_MOTO_THERMAL_CHARGER_STATE_NUM
-#else
 #define CHARGER_STATE_NUM 9
-#endif
 #define MAX_CHARGER_COOLER_NAME_LEN		(20)
 
 /*==================================================
@@ -53,10 +49,6 @@ struct charger_cooling_device {
 	enum charger_type type;
 	struct power_supply *chg_psy;
 	struct power_supply *s_chg_psy;
-	#ifdef CONFIG_MOTO_CHG_WT6670F_SUPPORT
-	struct power_supply *q_chg_psy;
-	struct power_supply *bq_chg_psy;
-	#endif
 	const struct charger_cooling_platform_data *pdata;
 };
 

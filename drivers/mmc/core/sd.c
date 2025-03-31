@@ -1001,7 +1001,15 @@ static bool mmc_sd_card_using_v18(struct mmc_card *card)
 	return card->sw_caps.sd3_bus_mode &
 	       (SD_MODE_UHS_SDR50 | SD_MODE_UHS_SDR104 | SD_MODE_UHS_DDR50);
 }
-
+// TN Begin modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
+static int sd_state = 0;
+static ssize_t sd_state_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", sd_state);
+}
+static DEVICE_ATTR(sd_state, 0444, sd_state_show, NULL);
+// TN End modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
 /*
  * Handle the detection and initialisation of a card.
  *
@@ -1158,6 +1166,9 @@ cont:
 	}
 
 	host->card = card;
+// TN Begin modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
+	sd_state = 1;
+// TN End modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
 	return 0;
 
 free_card:
@@ -1174,6 +1185,9 @@ static void mmc_sd_remove(struct mmc_host *host)
 {
 	mmc_remove_card(host->card);
 	host->card = NULL;
+// TN Begin modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
+	sd_state = 0;
+// TN End modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
 }
 
 /*
@@ -1347,7 +1361,9 @@ int mmc_attach_sd(struct mmc_host *host)
 	mmc_attach_bus(host, &mmc_sd_ops);
 	if (host->ocr_avail_sd)
 		host->ocr_avail = host->ocr_avail_sd;
-
+// TN Begin modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
+	device_create_file(&host->class_dev, &dev_attr_sd_state);
+// TN End modified by qinghua.zeng/860624 20230814 CR/EKFOGO4G-1422
 	/*
 	 * We need to get OCR a different way for SPI.
 	 */

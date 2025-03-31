@@ -170,17 +170,17 @@ static inline long gup_local_repeat(struct mm_struct *mm, uintptr_t start,
 	int retries = 10;
 	long ret = 0;
 
+/*tinno feiyu.zhu modify for EKFOGO4G-7575 start*/
 	while (retries--) {
 		ret = gup_local(mm, start, nr_pages, write, pages);
 
-		/* ExySp */
-		if (-EBUSY != ret && -ENOMEM != ret)
+		if (-EBUSY != ret  && -ENOMEM != ret)
 			break;
 	}
 
-	/* ExySp */
 	if (-EBUSY == ret || -ENOMEM == ret)
-		mc_dev_err(ret, "gup_local_repeat failed");
+		mc_dev_err((int)ret,"gup local repeat failed");
+/*tinno feiyu.zhu modify for EKFOGO4G-7575 end*/
 
 	return ret;
 }

@@ -15,12 +15,6 @@
 #define PRECISION_ENHANCE	5
 
 #define DISABLE_VBAT_THRESHOLD -1
-#define MMI_THERMAL_CURRENT_THRESHOLD	500
-#define MMI_THERMAL_VOL_THRESHOLD	80
-#define MMI_THERMAL_STEP	3
-#define MMI_MAX_IBAT	6000
-#define MMI_MAX_HRST_CNT 100
-#define MMI_MIN_CHARGER_VOLTAGE 4600000
 
 extern int pe50_get_log_level(void);
 #define PE50_DBG(fmt, ...) \
@@ -184,15 +178,6 @@ struct pe50_algo_data {
 	enum pe50_thermal_level tswchg_level;
 	int input_current_limit;
 	int cv_limit;
-	int mmi_fcc_limit;
-	int mmi_therm_fcc_limit;
-	int mmi_therm_cur_thres;
-	int mmi_therm_vol_thres;
-	int mmi_therm_step;
-	int mmi_max_ibat;
-	int mmi_hardreset_cnt;
-	int mmi_hardreset_max_cnt;
-	int min_charger_voltage;
 };
 
 /* Setting from dtsi */
@@ -294,10 +279,6 @@ extern int pe50_hal_enable_ta_charging(struct chg_alg_device *alg, bool en,
 extern int pe50_hal_sync_ta_volt(struct chg_alg_device *alg, u32 mV);
 extern int pe50_hal_authenticate_ta(struct chg_alg_device *alg,
 				    struct pe50_ta_auth_data *data);
-extern int pe50_hal_update_apdo_cap(struct chg_alg_device *alg,
-				    struct pe50_ta_auth_data *data);
-extern bool pe50_hal_is_adaptor_power_change(struct chg_alg_device *alg,
-			     struct pe50_ta_auth_data *data);
 extern int pe50_hal_send_ta_hardreset(struct chg_alg_device *alg);
 extern int pe50_hal_init_hardware(struct chg_alg_device *alg,
 				  const char **support_ta, int support_ta_cnt);
@@ -324,18 +305,19 @@ extern int pe50_hal_set_vbusovp_alarm(struct chg_alg_device *alg,
 				      enum chg_idx chgidx, u32 mV);
 extern int pe50_hal_reset_vbusovp_alarm(struct chg_alg_device *alg,
 					enum chg_idx chgidx);
+/* TN Begin modified by wenfeng.qi/809603 20240920 */
+#if IS_ENABLED(CONFIG_OEM_TINNO_CHARGER)
+extern int pe50_hal_enable_adc(struct chg_alg_device *alg, enum chg_idx chgidx, bool en);
+#endif
+/* TN End modified by wenfeng.qi/809603 20240920 */
 extern int pe50_hal_get_adc(struct chg_alg_device *alg, enum chg_idx chgidx,
 			    enum pe50_adc_channel chan, int *val);
 extern int pe50_hal_get_soc(struct chg_alg_device *alg, u32 *soc);
 extern int pe50_hal_is_pd_adapter_ready(struct chg_alg_device *alg);
 extern int pe50_hal_set_ichg(struct chg_alg_device *alg, enum chg_idx chgidx,
 			     u32 mA);
-extern int pe50_hal_set_cv(struct chg_alg_device *alg, enum chg_idx chgidx,
-				u32 uv);
 extern int pe50_hal_set_aicr(struct chg_alg_device *alg, enum chg_idx chgidx,
 			     u32 mA);
-extern int pe50_hal_set_mivr(struct chg_alg_device *alg, enum chg_idx chgidx,
-			     u32 uv);
 extern int pe50_hal_get_ichg(struct chg_alg_device *alg, enum chg_idx chgidx,
 			     u32 *mA);
 extern int pe50_hal_get_aicr(struct chg_alg_device *alg, enum chg_idx chgidx,

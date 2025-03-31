@@ -20,6 +20,9 @@
 
 static int (*subsys_init[])(struct pll_dts *array) = {
 	&fhctl_ap_init,
+#if IS_ENABLED(CONFIG_COMMON_CLK_MTK_FREQ_HOPPING_SSPM)
+	&fhctl_sspm_init,
+#endif
 #ifdef USE_FHCTL_MCUPM
 	&fhctl_mcupm_init,
 #endif
@@ -42,14 +45,27 @@ static bool _mtk_fh_set_rate(const char *pll_name, unsigned long dds, int postdi
 	int i;
 	struct fh_hdlr *hdlr = NULL;
 	struct pll_dts *array = get_dts_array();
-	int num_pll = array->num_pll;
+	int num_pll = 0;
+
+	if (!array) {
+		FHDBG("!array\n");
+		return false;
+	}
+
+	num_pll = array->num_pll;
 
 	if (!_inited) {
 		FHDBG("!_inited\n");
 		return false;
 	}
+
+	if (!pll_name) {
+		FHDBG("pll_name is NULL");
+		return false;
+	}
+
 	for (i = 0; i < num_pll; i++, array++) {
-		if (!strcmp(pll_name, array->pll_name)) {
+		if ((!strcmp(pll_name, array->pll_name))) {
 			hdlr = array->hdlr;
 			break;
 		}
@@ -62,11 +78,6 @@ static bool _mtk_fh_set_rate(const char *pll_name, unsigned long dds, int postdi
 				dds, 9999);
 		return true;
 	}
-	FHDBG("pll_name<%s> fh_id<%d> hdlr<%lx> perms<%x>",
-			array->pll_name,
-			array->fh_id,
-			(unsigned long)hdlr,
-			array->perms);
 	return false;
 }
 
@@ -163,8 +174,6 @@ static int fh_plt_drv_probe(struct platform_device *pdev)
 
 	FHDBG("in\n");
 
-	mtk_fh_set_rate = _mtk_fh_set_rate;
-
 	/* convert dt to data */
 	array = parse_dt(pdev);
 
@@ -191,7 +200,7 @@ static int fh_plt_drv_probe(struct platform_device *pdev)
 	/* set _inited is the last step */
 	mb();
 	_inited = true;
-
+	mtk_fh_set_rate = _mtk_fh_set_rate;
 	return 0;
 }
 
@@ -214,6 +223,10 @@ static void fh_plt_drv_shutdown(struct platform_device *pdev)
 }
 
 static const struct of_device_id fh_of_match[] = {
+	{ .compatible = "mediatek,mt6765-fhctl"},
+	{ .compatible = "mediatek,mt6739-fhctl"},
+	{ .compatible = "mediatek,mt6761-fhctl"},
+	{ .compatible = "mediatek,mt6768-fhctl"},
 	{ .compatible = "mediatek,mt6853-fhctl"},
 	{ .compatible = "mediatek,mt6855-fhctl"},
 	{ .compatible = "mediatek,mt6877-fhctl"},

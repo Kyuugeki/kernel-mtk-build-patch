@@ -20,6 +20,8 @@ struct _panel_rst_ctx {
 };
 
 static DEFINE_MUTEX(panel_ext_lock);
+// TN modified by kexin.wang/860557 20230824 CR/EKFOGO4G-1553
+static DEFINE_MUTEX(panel_boot_lock);
 static LIST_HEAD(panel_ext_list);
 static struct _panel_rst_ctx panel_rst_ctx;
 static enum mtk_lcm_version g_lcm_version;
@@ -89,6 +91,20 @@ int mtk_panel_tch_rst(struct drm_panel *panel)
 }
 EXPORT_SYMBOL(mtk_panel_tch_rst);
 
+/* TN Begin modified by kexin.wang/860557 20230824 CR/EKFOGO4G-1553 */
+void mtk_panel_lock(void)
+{
+	mutex_lock(&panel_boot_lock);
+}
+EXPORT_SYMBOL(mtk_panel_lock);
+
+void mtk_panel_unlock(void)
+{
+	mutex_unlock(&panel_boot_lock);
+}
+EXPORT_SYMBOL(mtk_panel_unlock);
+/* TN end modified by kexin.wang/860557 20230824 CR/EKFOGO4G-1553 */
+
 int mtk_panel_detach(struct mtk_panel_ctx *ctx)
 {
 	ctx->panel = NULL;
@@ -116,6 +132,7 @@ int mtk_panel_ext_create(struct device *dev,
 	mtk_panel_init(ext_ctx);
 	ext->params = ext_params;
 	ext->funcs = ext_funcs;
+	ext->is_connected = -1;
 	ext_ctx->ext = ext;
 
 	mtk_panel_add(ext_ctx);

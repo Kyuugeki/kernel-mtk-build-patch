@@ -84,18 +84,6 @@ static const struct svdm_svid_ops svdm_svid_ops[] = {
 		.reset_state = dc_reset_state,
 	},
 #endif	/* CONFIG_USB_PD_ALT_MODE_RTDC */
-
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-	{
-		.name = "mmi adapter",
-		.svid = USB_VID_MMI_ADAPTER,
-		.notify_pe_startup = mmi_dfp_notify_pe_startup,
-		.dfp_inform_svids = mmi_dfp_u_notify_discover_svid,
-		.dfp_notify_uvdm = mmi_dfp_notify_uvdm,
-		.notify_pe_ready = mmi_notify_pe_ready,
-	},
-#endif /* CONFIG_SUPPORT_MMI_ADAPTER */
-
 };
 
 int dpm_check_supported_modes(void)
@@ -268,7 +256,11 @@ static int pps_request_thread_fn(void *data)
 		while (!wait_event_timeout(pd_port->pps_request_wait_que,
 					!atomic_read(&pd_port->pps_request) ||
 					kthread_should_stop(),
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+					msecs_to_jiffies(7531))) {
+#else
 					msecs_to_jiffies(7*1000))) {
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 			pd_put_deferred_tcp_event(tcpc, &tcp_event);
 		}
 	}
@@ -2151,23 +2143,10 @@ void pd_dpm_dynamic_disable_vconn(struct pd_port *pd_port)
 /*
  * PE : Notify DPM
  */
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-extern bool mmi_tcpc_get_pd_flag(void);
-#endif
+
 int pd_dpm_notify_pe_startup(struct pd_port *pd_port)
 {
 	uint32_t reactions = DPM_REACTION_CAP_ALWAYS;
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-	bool dynamic_dpm_caps = mmi_tcpc_get_pd_flag();
-
-	if(dynamic_dpm_caps) {
-		//0x80e98b
-		pd_port->dpm_caps |= DPM_CAP_DR_CHECK_PROP(2);
-	}else {
-		//0xe98b
-		pd_port->dpm_caps &= ~DPM_CAP_DR_CHECK_PROP(2);
-	}
-#endif
 
 #if CONFIG_USB_PD_DFP_FLOW_DELAY_STARTUP
 	reactions |= DPM_REACTION_DFP_FLOW_DELAY;

@@ -48,6 +48,14 @@
 #define AFE_AGENT_SET_OFFSET 4
 #define AFE_AGENT_CLR_OFFSET 8
 
+static unsigned int g_channel;
+
+int mtk_get_channel_value(void)
+{
+	return g_channel;
+}
+EXPORT_SYMBOL(mtk_get_channel_value);
+
 static bool is_semaphore_control_need(bool is_scp_sema_support)
 {
 	bool is_adsp_active = false;
@@ -82,6 +90,54 @@ int mtk_regmap_write(struct regmap *map, int reg, unsigned int val)
 	return regmap_write(map, reg, val);
 }
 EXPORT_SYMBOL(mtk_regmap_write);
+
+
+#if IS_ENABLED(CONFIG_MTK_VOW_SUPPORT)
+static void vow_barge_in_disable_memif(struct mtk_base_afe *afe,
+				       struct mtk_base_afe_memif *memif)
+{
+	int irq_id = memif->irq_usage;
+	struct mtk_base_afe_irq *irqs = &afe->irqs[irq_id];
+	const struct mtk_base_irq_data *irq_data = irqs->irq_data;
+	unsigned int value = 0;
+	unsigned int TargetBitField;
+	unsigned int irq_enable;
+
+	/* get memif irq status */
+	regmap_read(afe->regmap, irq_data->irq_en_reg, &value);
+	TargetBitField = ((0x1 << 1) - 1) << irq_data->irq_en_shift;
+	irq_enable = (value & TargetBitField) >> irq_data->irq_en_shift;
+	dev_info(afe->dev, "%s(), memif irq status = 0x%x, irq_enable = %d\n",
+		 __func__, value, irq_enable);
+	if (irq_enable) {
+		mtk_regmap_update_bits(afe->regmap, irq_data->irq_en_reg,
+				       1, 0, irq_data->irq_en_shift);
+		dev_info(afe->dev, "%s(), disable barge-in memif irq\n", __func__);
+
+		/* after clear irq */
+		regmap_read(afe->regmap, irq_data->irq_en_reg, &value);
+		TargetBitField = ((0x1 << 1) - 1) << irq_data->irq_en_shift;
+		irq_enable = (value & TargetBitField) >> irq_data->irq_en_shift;
+		dev_dbg(afe->dev, "%s(), after clear irq, memif irq status= 0x%x, irq_enable= %d\n",
+			__func__, value, irq_enable);
+	}
+}
+
+static void vow_barge_in_hw_free(struct mtk_base_afe *afe)
+{
+	struct vow_sound_soc_ipi_send_info vow_ipi_info;
+	int ret = 0;
+
+	vow_ipi_info.msg_id = SOUND_SOC_IPIMSG_VOW_PCM_HWFREE;
+	vow_ipi_info.payload_len = 0;
+	vow_ipi_info.payload = NULL;
+	vow_ipi_info.need_ack = SOUND_SOC_VOW_IPI_BYPASS_ACK;
+	ret = notify_vow_ipi_send(NOTIFIER_VOW_IPI_SEND, &vow_ipi_info);
+	if (ret != NOTIFY_STOP)
+		dev_info(afe->dev, "%s(), IPIMSG_VOW_PCM_HWFREE ipi send error: %d\n",
+			 __func__, ret);
+}
+#endif
 
 int mtk_afe_fe_startup(struct snd_pcm_substream *substream,
 		       struct snd_soc_dai *dai)
@@ -294,7 +350,7 @@ int mtk_afe_fe_hw_params(struct snd_pcm_substream *substream,
 	}
 MEM_ALLOCATE_DONE:
 	dev_info(afe->dev,
-		 "%s(), %s, use_adsp_share_mem %d, using_sram %d, use_dram_only %d, ch %d, rate %d, fmt %d, dma_addr %pad, dma_area %p, dma_bytes 0x%zx\n",
+		 "%s(), %s, use_adsp_share_mem %d, using_sram %d, use_dram_only %d, ch %d, rate %d, fmt %d, dma_addr %pad, dma_area %llx, dma_bytes 0x%zx\n",
 		 __func__, memif->data->name,
 		 memif->use_adsp_share_mem,
 		 memif->using_sram, memif->use_dram_only,
@@ -302,6 +358,11 @@ MEM_ALLOCATE_DONE:
 		 &substream->runtime->dma_addr,
 		 substream->runtime->dma_area,
 		 substream->runtime->dma_bytes);
+
+	if (strstr(memif->data->name, "DL11"))
+		afe->memif_32bit_supported = 0;
+	else
+		afe->memif_32bit_supported = 1;
 
 	memset_io(substream->runtime->dma_area, 0,
 		  substream->runtime->dma_bytes);
@@ -386,6 +447,15 @@ int mtk_afe_fe_hw_free(struct snd_pcm_substream *substream,
 #if IS_ENABLED(CONFIG_MTK_SCP_AUDIO)
 	afe_pcm_ipi_to_scp(AUDIO_DSP_TASK_PCM_HWFREE,
 			   substream, NULL, dai, afe);
+#endif
+
+#if IS_ENABLED(CONFIG_MTK_VOW_SUPPORT)
+	if (memif->vow_barge_in_enable) {
+		// audio irq stop
+		vow_barge_in_disable_memif(afe, memif);
+		// send ipi to SCP
+		vow_barge_in_hw_free(afe);
+	}
 #endif
 
 	if (memif->using_sram == 0 && afe->release_dram_resource)
@@ -924,6 +994,15 @@ int mtk_memif_set_channel(struct mtk_base_afe *afe,
 		mono = (channel == 1) ? 0 : 1;
 	else
 		mono = (channel == 1) ? 1 : 0;
+
+	if (memif->data->ch_num_maskbit) {
+		mtk_regmap_update_bits(afe->regmap, memif->data->ch_num_reg,
+				       memif->data->ch_num_maskbit,
+				       channel, memif->data->ch_num_shift);
+	}
+
+	/* save channel value for cm get*/
+	g_channel = channel;
 
 	return mtk_regmap_update_bits(afe->regmap, memif->data->mono_reg,
 				      1, mono, memif->data->mono_shift);

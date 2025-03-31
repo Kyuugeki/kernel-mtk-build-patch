@@ -559,19 +559,6 @@ SND_SOC_DAILINK_DEFS(i2s0,
 	DAILINK_COMP_ARRAY(COMP_CPU("I2S0")),
 	DAILINK_COMP_ARRAY(COMP_DUMMY()),
 	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-
-#ifdef CONFIG_SND_SMARTPA_AW882XX
-SND_SOC_DAILINK_DEFS(i2s1,
-	DAILINK_COMP_ARRAY(COMP_CPU("I2S1")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("aw882xx_smartpa.6-0034", "aw882xx-aif-6-34"),
-	COMP_CODEC("aw882xx_smartpa.6-0035", "aw882xx-aif-6-35")),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-SND_SOC_DAILINK_DEFS(i2s2,
-	DAILINK_COMP_ARRAY(COMP_CPU("I2S2")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("aw882xx_smartpa.6-0034", "aw882xx-aif-6-34"),
-	COMP_CODEC("aw882xx_smartpa.6-0035", "aw882xx-aif-6-35")),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-#else
 SND_SOC_DAILINK_DEFS(i2s1,
 	DAILINK_COMP_ARRAY(COMP_CPU("I2S1")),
 	DAILINK_COMP_ARRAY(COMP_DUMMY()),
@@ -580,7 +567,6 @@ SND_SOC_DAILINK_DEFS(i2s2,
 	DAILINK_COMP_ARRAY(COMP_CPU("I2S2")),
 	DAILINK_COMP_ARRAY(COMP_DUMMY()),
 	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-#endif
 SND_SOC_DAILINK_DEFS(i2s3,
 	DAILINK_COMP_ARRAY(COMP_CPU("I2S3")),
 	DAILINK_COMP_ARRAY(COMP_DUMMY()),
@@ -1303,15 +1289,6 @@ static struct snd_soc_card mt6879_mt6368_soc_card = {
 	.num_dapm_routes = ARRAY_SIZE(mt6879_mt6368_routes),
 };
 
-#if IS_ENABLED(CONFIG_DUMMY_SND_CARD_SUPPORT)
-int smartpa_dailink_dummy_flag = 0;
-void set_dailink_dummy_flag(int flag) {
-	smartpa_dailink_dummy_flag = flag;
-};
-
-EXPORT_SYMBOL(set_dailink_dummy_flag);
-#endif
-
 static int mt6879_mt6368_dev_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = &mt6879_mt6368_soc_card;
@@ -1350,29 +1327,6 @@ static int mt6879_mt6368_dev_probe(struct platform_device *pdev)
 		if (!dai_link->platforms->name)
 			dai_link->platforms->of_node = platform_node;
 
-#if IS_ENABLED(CONFIG_DUMMY_SND_CARD_SUPPORT)
-		if (smartpa_dailink_dummy_flag == 0){
-		    dev_info(&pdev->dev,"smart pa not init\n");
-		    ret = -517;
-		    return ret;
-		} else if (smartpa_dailink_dummy_flag == 1){
-		    dev_info(&pdev->dev,"smart pa init fail\n");
-
-		    if (!strcmp(dai_link->name, "I2S1")) {
-		        ret = snd_soc_of_get_dai_link_codecs(
-						&pdev->dev, spk_node, dai_link);
-			if (ret < 0) {
-				dev_err(&pdev->dev,"I2S1 get_dai_link fail: %d\n", ret);
-			}
-		    } else if (!strcmp(dai_link->name, "I2S2")) {
-			ret = snd_soc_of_get_dai_link_codecs(
-						&pdev->dev, spk_node, dai_link);
-			if (ret < 0) {
-				dev_err(&pdev->dev,"I2S2 get_dai_link fail: %d\n", ret);
-			}
-		    }
-		}
-#endif
 		if (!strcmp(dai_link->name, "Speaker Codec")) {
 			ret = snd_soc_of_get_dai_link_codecs(
 						&pdev->dev, spk_node, dai_link);

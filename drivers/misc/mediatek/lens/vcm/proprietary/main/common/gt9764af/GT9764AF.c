@@ -54,7 +54,7 @@ static int s4AF_ReadReg(u8 a_uAddr, u8 *a_uData)
 		return -1;
 	}
 
-	/* LOG_INF("RDI2C 0x%x, 0x%x\n", a_uAddr, *a_uData); */
+	LOG_INF("RDI2C 0x%x, 0x%x\n", a_uAddr, *a_uData);
 
 	return 0;
 }
@@ -67,7 +67,7 @@ static int s4AF_WriteReg(u8 a_uLength, u8 a_uAddr, u16 a_u2Data)
 
 	g_pstAF_I2Cclient->addr = (AF_I2C_SLAVE_ADDR) >> 1;
 
-	/* LOG_INF("WRI2C 0x%04x, 0x%x\n", a_uAddr, a_u2Data); */
+	LOG_INF("WRI2C 0x%04x, 0x%x\n", a_uAddr, a_u2Data);
 
 	if (a_uLength == 0) {
 		if (i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2) < 0) {
@@ -93,7 +93,7 @@ static int setPosition(unsigned short UsPosition)
 
 	TarPos = UsPosition;
 
-	/* LOG_INF("DAC(%04d) -> %03x\n", UsPosition, TarPos); */
+	LOG_INF("DAC(%04d) -> %03x\n", UsPosition, TarPos);
 
 	UcPosH = (unsigned char)((TarPos >> 8) & 0x03);
 	UcPosL = (unsigned char)(TarPos & 0x00FF);
@@ -142,9 +142,9 @@ static int initAF(void)
 
 		s4AF_ReadReg(0x00, &Temp);  //ic info
 		LOG_INF("Check HW version: 0x00 is %x\n", Temp);
-		ret = s4AF_WriteReg(0, 0x02, 0x00); //CONTROL
-
-
+		ret = s4AF_WriteReg(0, 0x02, 0x02); //CONTROL
+		s4AF_WriteReg(0, 0x06, 0x80);
+		s4AF_WriteReg(0, 0x07, 0x62);
 
 		spin_lock(g_pAF_SpinLock);
 		*g_pAF_Opened = 2;
@@ -291,4 +291,9 @@ int GT9764AF_GetFileName(unsigned char *pFileName)
 	pFileName[0] = '\0';
 	#endif
 	return 1;
+}
+
+unsigned long GT9764AF_GetCurrentPos(void)
+{
+    return g_u4CurrPosition;
 }

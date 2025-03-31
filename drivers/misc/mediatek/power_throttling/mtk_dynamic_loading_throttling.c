@@ -39,7 +39,6 @@ struct reg_t {
 struct dlpt_regs_t {
 	struct reg_t rgs_chrdet;
 	struct reg_t uvlo_reg;
-	struct reg_t vbb_uvlo_reg;
 	const struct linear_range uvlo_range;
 };
 
@@ -110,11 +109,6 @@ struct dlpt_regs_t mt6363_dlpt_regs = {
 		MT6363_RG_VSYS_UVLO_VTHL_ADDR,
 		MT6363_RG_VSYS_UVLO_VTHL_MASK << MT6363_RG_VSYS_UVLO_VTHL_SHIFT,
 		MT6363_RG_VSYS_UVLO_VTHL_SHIFT
-	},
-	.vbb_uvlo_reg = {
-		MT6363_RG_VBB_UVLO_VTHL_ADDR,
-		MT6363_RG_VBB_UVLO_VTHL_MASK << MT6363_RG_VBB_UVLO_VTHL_SHIFT,
-		MT6363_RG_VBB_UVLO_VTHL_SHIFT
 	},
 	.uvlo_range = {
 		.min = 2000,
@@ -548,26 +542,10 @@ static void pmic_uvlo_init(int uvlo_level)
 		pr_notice("[dlpt] Invalid uvlo_level (%d)\n", uvlo_level);
 }
 
-static void pmic_vbb_uvlo_init(int vbb_uvlo_level)
-{
-	int ret, val = 0;
-
-	ret = linear_range_get_selector(&dlpt.regs->uvlo_range, vbb_uvlo_level, &val);
-	if (!ret) {
-		regmap_update_bits(dlpt.regmap, dlpt.regs->vbb_uvlo_reg.addr,
-				   dlpt.regs->vbb_uvlo_reg.mask,
-				   val << dlpt.regs->vbb_uvlo_reg.shift);
-		pr_info("[dlpt] VBB_UVLO_VOLT_LEVEL = %d, RG_VBB_UVLO_VTHL = 0x%x\n",
-			vbb_uvlo_level, val);
-	} else
-		pr_info("[dlpt] Invalid vbb_uvlo_level (%d)\n", vbb_uvlo_level);
-}
-
 static void dlpt_parse_dt(struct platform_device *pdev)
 {
 	struct device_node *np;
 	int uvlo_level;
-	int vbb_uvlo_level = 0;
 	int ret;
 
 	/* get power_path_support */
@@ -592,13 +570,6 @@ static void dlpt_parse_dt(struct platform_device *pdev)
 		if (ret)
 			uvlo_level = POWER_UVLO_VOLT_LEVEL;
 		pmic_uvlo_init(uvlo_level);
-
-		/* get vbb-uvlo-level */
-		ret = of_property_read_u32(np, "vbb-uvlo-level", &vbb_uvlo_level);
-		if (ret == 0) {
-			pmic_vbb_uvlo_init(vbb_uvlo_level);
-		} else
-			pr_info("[dlpt] Invalid vbb-uvlo-level (%d)\n", vbb_uvlo_level);
 	}
 	dev_notice(&pdev->dev, "power_path_support:%d isense_support:%d\n"
 		   , dlpt.is_power_path_supported, dlpt.is_isense_supported);

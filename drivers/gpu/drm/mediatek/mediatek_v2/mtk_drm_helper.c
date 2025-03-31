@@ -82,6 +82,7 @@ static struct mtk_drm_helper help_info[] = {
 	{MTK_DRM_OPT_RES_SWITCH, 1, "MTK_DRM_OPT_RES_SWITCH"},
 	{MTK_DRM_OPT_PRE_TE, 1, "MTK_DRM_OPT_PRE_TE"},
 	{MTK_DRM_OPT_VIRTUAL_DISP, 1, "MTK_DRM_OPT_VIRTUAL_DISP"},
+	{MTK_DRM_OPT_SHARE_SRAM, 0, "MTK_DRM_OPT_SHARE_SRAM"},
 };
 
 enum DISP_HELPER_STAGE disp_helper_get_stage(void)
@@ -211,10 +212,6 @@ void mtk_drm_helper_init(struct device *dev, struct mtk_drm_helper **helper_opt)
 	if (of_property_read_bool(dev->of_node, "support_mml_cmd_mode"))
 		mtk_drm_helper_set_opt_by_name(tmp_opt,
 				"MTK_DRM_OPT_MML_SUPPORT_CMD_MODE", 1);
-
-	if (of_property_read_bool(dev->of_node, "force_dyn_mipi_change"))
-		mtk_drm_helper_set_opt_by_name(tmp_opt,
-				"MTK_DRM_OPT_DYN_MIPI_CHANGE", 1);
 
 	*helper_opt = tmp_opt;
 }

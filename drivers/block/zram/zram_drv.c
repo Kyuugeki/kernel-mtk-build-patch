@@ -2146,7 +2146,7 @@ static int __init zram_init(void)
 			goto out_error;
 		num_devices--;
 	}
-
+	pr_err("Zram Tinno init OK \n");
 	return 0;
 
 out_error:

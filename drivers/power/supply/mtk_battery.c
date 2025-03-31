@@ -28,9 +28,14 @@
 #include <linux/wait.h>		/* For wait queue*/
 #include <net/sock.h>		/* netlink */
 #include <linux/suspend.h>
-#include <linux/power/moto_chg_tcmd.h>
 #include "mtk_battery.h"
 #include "mtk_battery_table.h"
+
+/*TN Begin modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
+#if IS_ENABLED(CONFIG_OEM_DEVINFO)
+#include <dev_info.h>
+#endif
+/*TN End modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
 
 struct tag_bootmode {
 	u32 size;
@@ -152,88 +157,40 @@ bool is_algo_active(struct mtk_battery *gm)
 	return gm->algo.active;
 }
 
-static const char *mmi_get_battery_serialnumber(void)
+/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+int fgauge_get_profile_id(struct mtk_battery *gm)
 {
-	struct device_node *np = of_find_node_by_path("/chosen");
-	const char *battsn_buf;
-	int retval;
+	char *battery_sn = NULL;
+	char *str1 = "SB18D96852";	//1st 5000mah
+	char *str2 = "SB18D99898";	//2nd 5000mah
+	char *str3 = "SB18E01573";	//1st 6000mah
+	char *str4 = "SB18E01574";	//2nd 6000mah
 
-	battsn_buf = NULL;
+	battery_sn = oem_battery_sn();
+	bm_err("battery profile name: %s\n", battery_sn);
 
-	if (np)
-		retval = of_property_read_string(np, "mmi,battid",
-						 &battsn_buf);
-	else
-		return NULL;
-
-	if ((retval == -EINVAL) || !battsn_buf) {
-		pr_err("Battsn unused\n");
-		of_node_put(np);
-		return NULL;
-
-	} else
-		pr_err("Battsn = %s\n", battsn_buf);
-
-	of_node_put(np);
-
-	return battsn_buf;
-}
-
-static int mmi_get_batid_by_serialnumber(void)
-{
-	struct device_node  *batt_node;
-	const char *sn_buf, *df_sn, *dev_sn;
-	int i, rc;
-	char string[12];
-
-	dev_sn = NULL;
-	df_sn = NULL;
-	sn_buf = NULL;
-	batt_node = NULL;
-
-	batt_node = of_find_node_by_name(NULL, "mtk_gauge");
-	if (!batt_node) {
-		pr_err("Batterydata not available\n");
-		return 0;
+	if (!strcmp(battery_sn, str1)) {
+		gm->battery_id = 0;
+	} else if (!strcmp(battery_sn, str2)) {
+		gm->battery_id = 1;
+	} else if (!strcmp(battery_sn, str3)) {
+		gm->battery_id = 2;
+	} else if (!strcmp(battery_sn, str4)) {
+		gm->battery_id = 3;
+	} else {
+		gm->battery_id = 0;
 	}
 
-	dev_sn = mmi_get_battery_serialnumber();
+/*TN Begin modified by maocai.cao/808964 20231128 CR/EKFOGO4G-8607*/
+#if IS_ENABLED(CONFIG_OEM_DEVINFO)
+	FULL_PRODUCT_DEVICE_INFO(ID_BATTERY, battery_sn);
+#endif
+/*TN End modified by maocai.cao/808964 20231128 CR/EKFOGO4G-8607*/
 
-	rc = of_property_read_string(batt_node, "df-serialnum",
-				     &df_sn);
-	if (rc)
-		pr_warn("No Default Serial Number defined\n");
-	else if (df_sn)
-		pr_info("Default Serial Number %s\n", df_sn);
-
-	for (i = 0; i < TOTAL_BATTERY_NUMBER; i++) {
-		snprintf(string, sizeof(string), "serialnum_%d", i);
-		rc = of_property_read_string(batt_node, string,
-					     &sn_buf);
-		pr_warn("string=%s, sn_buf=%s, i=%d, rc=%d\n",
-			string, sn_buf, i ,rc);
-		if (!rc && sn_buf) {
-			if (dev_sn) {
-				if (strnstr(dev_sn, sn_buf, 32)) {
-					pr_warn("using dev_sn battid=%d\n", i);
-					return i;
-				}
-			} else if (df_sn) {
-				if (strnstr(df_sn, sn_buf, 32)) {
-					pr_warn("using df_sn battid=%d\n", i);
-					return i;
-				}
-			}
-		}
-	}
-
-	return 0;
+	bm_err("battery profile id: %d\n", gm->battery_id);
+	return gm->battery_id;
 }
-
-int fgauge_get_profile_id(void)
-{
-	return mmi_get_batid_by_serialnumber();
-}
+/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
 
 int wakeup_fg_algo_cmd(
 	struct mtk_battery *gm, unsigned int flow_state, int cmd, int para1)
@@ -295,7 +252,7 @@ int dump_pseudo100(enum charge_sel select)
 
 	bm_err("%s:select=%d\n", __func__, select);
 
-	if (select > MAX_CHARGE_RDC || select < 0)
+	if (select >= MAX_CHARGE_RDC || select < 0)
 		return 0;
 
 	for (i = 0; i < MAX_TABLE; i++) {
@@ -340,16 +297,6 @@ int check_cap_level(int uisoc)
 		return POWER_SUPPLY_CAPACITY_LEVEL_UNKNOWN;
 }
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-static enum power_supply_property usb_props[] = {
-	POWER_SUPPLY_PROP_ONLINE,
-	POWER_SUPPLY_PROP_CURRENT_MAX,
-	POWER_SUPPLY_PROP_VOLTAGE_MAX,
-	POWER_SUPPLY_PROP_VOLTAGE_NOW,
-	POWER_SUPPLY_PROP_CHARGE_COUNTER
-};
-#endif
-
 static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_HEALTH,
@@ -360,9 +307,6 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
-#if 0
-	POWER_SUPPLY_PROP_CHARGER_VOLTAGE,
-#endif
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_TEMP,
@@ -371,51 +315,6 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
 };
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-static int usb_psy_get_property(struct power_supply *psy,
-					enum power_supply_property psp,
-					union power_supply_propval *val)
-{
-	int ret = 0;
-	struct mtk_battery *gm;
-	struct usb_data *usb_data;
-
-	gm = (struct mtk_battery *)power_supply_get_drvdata(psy);
-	usb_data = &gm->usb_data;
-
-	switch (psp) {
-	case POWER_SUPPLY_PROP_ONLINE:
-		val->intval = usb_data->usb_online;
-		break;
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		val->intval = 5000000;
-		break;
-	case POWER_SUPPLY_PROP_CURRENT_MAX:
-		val->intval = 500000;
-		break;
-	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
-		val->intval = gm->ui_soc *
-			gm->fg_table_cust_data.fg_profile[
-				gm->battery_id].q_max * 1000 / 100;
-		break;
-	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		if (gm->disableGM30)
-			usb_data->charger_vol = 5000;
-		else
-			ret = gauge_get_property(GAUGE_PROP_CHARGER_VOLTAGE,
-				&usb_data->charger_vol);
-
-		val->intval = usb_data->charger_vol * 10;
-		ret = 0;
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-	return ret;
-}
-#endif
 
 static int battery_psy_get_property(struct power_supply *psy,
 	enum power_supply_property psp,
@@ -440,7 +339,6 @@ static int battery_psy_get_property(struct power_supply *psy,
 		val->intval = bs_data->bat_status;
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
-		bs_data->bat_health = mmi_batt_health_check();
 		val->intval = bs_data->bat_health;
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
@@ -460,15 +358,12 @@ static int battery_psy_get_property(struct power_supply *psy,
 		val->intval = bs_data->bat_technology;
 		break;
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
-		if(gm->bat_cycle_count > 0)
-			val->intval = gm->bat_cycle_count;
-		else
-			val->intval = gm->bat_cycle;
+		val->intval = 1;
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		/* 1 = META_BOOT, 4 = FACTORY_BOOT 5=ADVMETA_BOOT */
 		/* 6= ATE_factory_boot */
-		if (gm->bootmode == 1 || gm->bootmode == 4
+		if (gm->bootmode == 4
 			|| gm->bootmode == 5 || gm->bootmode == 6) {
 			val->intval = 75;
 			break;
@@ -503,23 +398,15 @@ static int battery_psy_get_property(struct power_supply *psy,
 
 		ret = 0;
 		break;
-#if 0
-	case POWER_SUPPLY_PROP_CHARGER_VOLTAGE:
-		if (gm->disableGM30)
-			bs_data->charger_vol = 5000;
-		else
-			ret = gauge_get_property(GAUGE_PROP_CHARGER_VOLTAGE,
-				&bs_data->charger_vol);
-
-		val->intval = bs_data->charger_vol * 10;
-		ret = 0;
-		break;
-#endif
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		val->intval = gm->algo_qmax * 1000 / 10;
+		val->intval =
+			gm->fg_table_cust_data.fg_profile[
+				gm->battery_id].q_max * 1000;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
-		val->intval = gm->ui_soc * (gm->algo_qmax * 1000 / 10) / 100;
+		val->intval = gm->ui_soc *
+			gm->fg_table_cust_data.fg_profile[
+				gm->battery_id].q_max * 1000 / 100;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		/* 1 = META_BOOT, 4 = FACTORY_BOOT 5=ADVMETA_BOOT */
@@ -590,7 +477,7 @@ static int battery_psy_get_property(struct power_supply *psy,
 
 			q_max_mah =
 				gm->fg_table_cust_data.fg_profile[
-				gm->battery_id].q_max;
+				gm->battery_id].q_max / 10;
 
 			q_max_uah = q_max_mah * 1000;
 			if (q_max_uah <= 100000) {
@@ -604,13 +491,18 @@ static int battery_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 		bs_data = &gm->bs_data;
 		if (IS_ERR_OR_NULL(bs_data->chg_psy)) {
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+			bs_data->chg_psy = power_supply_get_by_name("ext_charger_type");
+			if (IS_ERR_OR_NULL(bs_data->chg_psy)) {
+				bm_err("%s get ext_charger_type chg psy failed\n", __func__);
+			}
+#else
 			bs_data->chg_psy = devm_power_supply_get_by_phandle(
 				&gm->gauge->pdev->dev, "charger");
-				if (IS_ERR_OR_NULL(bs_data->chg_psy)) {
-					bs_data->chg_psy = devm_power_supply_get_by_phandle(
-						&gm->gauge->pdev->dev, "charger_2nd");
-					bm_err("%s retry to get chg_psy\n", __func__);
-				}
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+			bm_err("%s retry to get chg_psy\n", __func__);
 		}
 		if (IS_ERR_OR_NULL(bs_data->chg_psy)) {
 			bm_err("%s Couldn't get chg_psy\n", __func__);
@@ -669,14 +561,16 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 {
 	struct mtk_battery *gm;
 	struct battery_data *bs_data;
-	union power_supply_propval online, status, wls_online;
+	union power_supply_propval online, status, vbat0;
 	union power_supply_propval prop_type;
 	int cur_chr_type = 0, old_vbat0 = 0;
-	union power_supply_propval vbat0;
-	
-	struct power_supply *chg_psy = NULL, *wl_psy = NULL;
+
+	struct power_supply *chg_psy = NULL;
 	struct power_supply *dv2_chg_psy = NULL;
 	int ret;
+/*TN Begin modified by zelin.pan/860620 202309112 CR/EKFOGO4G-1883*/
+	int i;
+/*TN End modified by zelin.pan/860620 202309112 CR/EKFOGO4G-1883*/
 
 	gm = psy->drv_data;
 	bs_data = &gm->bs_data;
@@ -688,33 +582,41 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 		return;
 	}
 
-	wl_psy = power_supply_get_by_name("wireless");
-	if (wl_psy == NULL || IS_ERR(wl_psy)) {
-		bm_err("%s Couldn't get wl_psy\n", __func__);
-		wls_online.intval = 0;
-	} else {
-		ret = power_supply_get_property(wl_psy,
-			POWER_SUPPLY_PROP_ONLINE, &wls_online);
-	}
 	if (IS_ERR_OR_NULL(chg_psy)) {
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+		chg_psy = power_supply_get_by_name("ext_charger_type");
+		if (IS_ERR_OR_NULL(chg_psy)) {
+			bm_err("%s get ext_charger_type chg psy failed\n", __func__);
+		}
+#else
 		chg_psy = devm_power_supply_get_by_phandle(&gm->gauge->pdev->dev,
 							   "charger");
-		if (IS_ERR_OR_NULL(chg_psy)) {
-			chg_psy = devm_power_supply_get_by_phandle(&gm->gauge->pdev->dev,
-								"charger_2nd");
-			bm_err("%s retry to get chg_psy\n", __func__);
-			bs_data->chg_psy = chg_psy;
-			bm_err("%s charger psy name: %s\n", __func__, chg_psy->desc->name); 
-		}
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+		bm_err("%s retry to get chg_psy\n", __func__);
 		bs_data->chg_psy = chg_psy;
 	} else {
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ONLINE, &online);
-		online.intval =online.intval || wls_online.intval;
 
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_STATUS, &status);
 
+/*TN Begin modified by zelin.pan/860620 20230912 CR/EKFOGO4G-1883*/
+		if (status.intval == POWER_SUPPLY_STATUS_NOT_CHARGING && online.intval == 1) {
+			for (i = 0; i < 12; i++) {
+				msleep(50);
+				ret = power_supply_get_property(chg_psy,
+					POWER_SUPPLY_PROP_STATUS, &status);
+				if (status.intval == POWER_SUPPLY_STATUS_CHARGING) {
+					break;
+				}
+			}
+			bm_err("%s RETRY event, name:%s online:%d, status:%d\n",
+				__func__, psy->desc->name, online.intval, status.intval);
+		}
+/*TN End modified by zelin.pan/860620 20230912 CR/EKFOGO4G-1883*/
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ENERGY_EMPTY, &vbat0);
 
@@ -736,10 +638,7 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 							POWER_SUPPLY_STATUS_CHARGING;
 					}
 				}
-			} else if (status.intval == POWER_SUPPLY_STATUS_FULL)
-				bs_data->bat_status =
-					POWER_SUPPLY_STATUS_FULL;
-			else {
+			} else {
 				bs_data->bat_status =
 					POWER_SUPPLY_STATUS_CHARGING;
 			}
@@ -752,6 +651,12 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 			bm_err("POWER_SUPPLY_STATUS_FULL, EOC\n");
 			gauge_get_int_property(GAUGE_PROP_BAT_EOC);
 			bm_err("GAUGE_PROP_BAT_EOC done\n");
+/*TN Begin modified by zhen.liu11/860655 20231115 CR/EKFOGO4G-6350*/
+			/*TN Begin modified by lingfei.tang11/777407 20231129 CR/EKFOGO4G-8389*/
+			if (gm->ui_soc == 100)
+			/*TN End modified by lingfei.tang11/777407 20231129 CR/EKFOGO4G-8389*/
+				bs_data->bat_status = POWER_SUPPLY_STATUS_FULL;
+/*TN End modified by zhen.liu11/860655 20231115 CR/EKFOGO4G-6350*/
 			gm->b_EOC = true;
 			notify_fg_chr_full(gm);
 		} else
@@ -760,18 +665,15 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 		battery_update(gm);
 
 		/* check charger type */
-		if (wls_online.intval) {
-			cur_chr_type = POWER_SUPPLY_TYPE_WIRELESS;
-		} else {
-			ret = power_supply_get_property(chg_psy,
+		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_USB_TYPE, &prop_type);
 
-			/* plug in out */
-			cur_chr_type = prop_type.intval;
-		}
+		/* plug in out */
+		cur_chr_type = prop_type.intval;
+
 		if (cur_chr_type == POWER_SUPPLY_TYPE_UNKNOWN) {
 			if (gm->chr_type != POWER_SUPPLY_TYPE_UNKNOWN)
-				bm_err("%s chr plug out\n");
+				bm_err("%s chr plug out\n", __func__);
 		} else {
 			if (gm->chr_type == POWER_SUPPLY_TYPE_UNKNOWN)
 				wakeup_fg_algo(gm, FG_INTR_CHARGER_IN);
@@ -785,7 +687,6 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 				old_vbat0, vbat0.intval);
 			wakeup_fg_algo(gm, FG_INTR_NAG_C_DLTV);
 		}
-
 	}
 
 	bm_err("%s event, name:%s online:%d, status:%d, EOC:%d, cur_chr_type:%d old:%d, vbat0:[o:%d n:%d]\n",
@@ -796,24 +697,6 @@ static void mtk_battery_external_power_changed(struct power_supply *psy)
 	gm->chr_type = cur_chr_type;
 
 }
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-void usb_service_data_init(struct mtk_battery *gm)
-{
-	struct usb_data *usb_data;
-
-	usb_data = &gm->usb_data;
-	usb_data->psd.name = "usb_vbus",
-	usb_data->psd.type = POWER_SUPPLY_TYPE_USB;
-	usb_data->psd.properties = usb_props;
-	usb_data->psd.num_properties = ARRAY_SIZE(usb_props);
-	usb_data->psd.get_property = usb_psy_get_property;
-	usb_data->psy_cfg.drv_data = gm;
-
-	usb_data->usb_online = 0;
-}
-#endif
-
 void battery_service_data_init(struct mtk_battery *gm)
 {
 	struct battery_data *bs_data;
@@ -850,21 +733,23 @@ int adc_battemp(struct mtk_battery *gm, int res)
 	int tbatt_value = -200, tmp1 = 0, tmp2 = 0;
 	struct fg_temp *ptable;
 
+/*TN Begin modified by zelin.pan/860620 20231008 CR/EKFOGO4G-1548*/
 	ptable = gm->tmp_table;
 	if (res >= ptable[0].TemperatureR) {
 		tbatt_value = -40;
-	} else if (res <= ptable[22].TemperatureR) {
-		tbatt_value = 70;
+	} else if (res <= ptable[24].TemperatureR) {
+		tbatt_value = 80;
 	} else {
 		res1 = ptable[0].TemperatureR;
 		tmp1 = ptable[0].BatteryTemp;
 
-		for (i = 0; i <= 22; i++) {
+		for (i = 0; i <= 24; i++) {
 			if (res >= ptable[i].TemperatureR) {
 				res2 = ptable[i].TemperatureR;
 				tmp2 = ptable[i].BatteryTemp;
 				break;
 			}
+/*TN End modified by zelin.pan/860620 20231008 CR/EKFOGO4G-1548*/
 			{	/* hidden else */
 				res1 = ptable[i].TemperatureR;
 				tmp1 = ptable[i].BatteryTemp;
@@ -971,13 +856,8 @@ int force_get_tbat_internal(struct mtk_battery *gm, bool update)
 
 			gm->ibat = fg_current_temp;
 
-                        if (gm->fg_current_pn_label == 1) {
-                            if (fg_current_temp < 0)
-                                fg_current_state = true;
-                        } else {
-                            if (fg_current_temp > 0)
-                                fg_current_state = true;
-                        }
+			if (fg_current_temp > 0)
+				fg_current_state = true;
 
 			fg_current_temp = abs(fg_current_temp) / 10;
 
@@ -1121,8 +1001,10 @@ int gauge_get_property(enum gauge_property gp,
 	int ret = 0;
 
 	psy = power_supply_get_by_name("mtk-gauge");
-	if (psy == NULL)
+	if (psy == NULL) {
+		bm_err("Cannot get power supply of name\n");
 		return -ENODEV;
+	}
 
 	gauge = (struct mtk_gauge *)power_supply_get_drvdata(psy);
 	gm = gauge->gm;
@@ -1165,8 +1047,10 @@ int gauge_set_property(enum gauge_property gp,
 	struct mtk_gauge_sysfs_field_info *attr;
 
 	psy = power_supply_get_by_name("mtk-gauge");
-	if (psy == NULL)
+	if (psy == NULL) {
+		bm_err("Cannot get power supply of name\n");
 		return -ENODEV;
+	}
 
 	gauge = (struct mtk_gauge *)power_supply_get_drvdata(psy);
 	attr = gauge->attr;
@@ -1200,9 +1084,11 @@ void fg_custom_init_from_header(struct mtk_battery *gm)
 
 	fg_cust_data = &gm->fg_cust_data;
 	fg_table_cust_data = &gm->fg_table_cust_data;
-#ifdef MTK_BASE
-	fgauge_get_profile_id();
-#endif
+
+/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+	fgauge_get_profile_id(gm);
+/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+
 	fg_cust_data->versionID1 = FG_DAEMON_CMD_FROM_USER_NUMBER;
 	fg_cust_data->versionID2 = sizeof(gm->fg_cust_data);
 	fg_cust_data->versionID3 = FG_KERNEL_CMD_FROM_USER_NUMBER;
@@ -1560,7 +1446,7 @@ void fg_custom_init_from_header(struct mtk_battery *gm)
 	gm->rbat.rbat_pull_up_r = RBAT_PULL_UP_R;
 	gm->rbat.rbat_pull_up_volt = RBAT_PULL_UP_VOLT;
 	gm->rbat.bif_ntc_r = BIF_NTC_R;
-	gm->fg_current_pn_label = 0;
+
 	if (IS_ENABLED(BAT_NTC_47)) {
 		gm->rbat.type = 47;
 		gm->rbat.rbat_pull_up_r = RBAT_PULL_UP_R;
@@ -1701,7 +1587,9 @@ void fg_custom_init_from_dts(struct platform_device *dev,
 	struct fuel_gauge_custom_data *fg_cust_data;
 	struct fuel_gauge_table_custom_data *fg_table_cust_data;
 
-	gm->battery_id = fgauge_get_profile_id();
+/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+	gm->battery_id = fgauge_get_profile_id(gm);
+/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
 	bat_id = gm->battery_id;
 	fg_cust_data = &gm->fg_cust_data;
 	fg_table_cust_data = &gm->fg_table_cust_data;
@@ -1795,8 +1683,7 @@ void fg_custom_init_from_dts(struct platform_device *dev,
 		&(fg_cust_data->full_tracking_bat_int2_multiply), 1);
 	fg_read_dts_val(np, "enable_tmp_intr_suspend",
 		&(gm->enable_tmp_intr_suspend), 1);
-	fg_read_dts_val(np, "FG_CURRENT_PN_LABEL",
-		&(gm->fg_current_pn_label), 1);
+
 	/* Aging Compensation */
 	fg_read_dts_val(np, "AGING_ONE_EN", &(fg_cust_data->aging_one_en), 1);
 	fg_read_dts_val(np, "AGING1_UPDATE_SOC",
@@ -1929,10 +1816,6 @@ void fg_custom_init_from_dts(struct platform_device *dev,
 		&(fg_cust_data->vbat_oldocv_diff), 1);
 	fg_read_dts_val(np, "SWOCV_OLDOCV_DIFF_EMB",
 		&(fg_cust_data->swocv_oldocv_diff_emb), 1);
-	fg_read_dts_val(np, "VIR_OLDOCV_DIFF_EMB",
-		&(fg_cust_data->vir_oldocv_diff_emb), 1);
-	fg_read_dts_val(np, "VIR_OLDOCV_DIFF_EMB_LT",
-		&(fg_cust_data->vir_oldocv_diff_emb_lt), 1);
 
 	fg_read_dts_val(np, "PMIC_SHUTDOWN_TIME",
 		&(fg_cust_data->pmic_shutdown_time), UNIT_TRANS_60);
@@ -2299,9 +2182,6 @@ void fg_custom_init_from_dts(struct platform_device *dev,
 		fg_custom_parse_table(gm, np, node_name,
 			fg_table_cust_data->fg_profile[i].fg_profile, column);
 	}
-
-	fg_read_dts_val(np, "CHARGER_IEOC", &(fg_cust_data->charger_ieoc), 1);
-
 }
 
 #endif	/* end of CONFIG_OF */
@@ -2651,26 +2531,6 @@ static int init_done_set(struct mtk_battery *gm,
 	return 0;
 }
 
-static int battery_cycle_set(struct mtk_battery *gm,
-	struct mtk_battery_sysfs_field_info *attr,
-	int val)
-{
-	if(val >= 0) {
-		gm->bat_cycle_count = val;
-		bm_debug("[%s] cycle_count = %d\n", __func__, gm->bat_cycle_count);
-	}
-	return 0;
-}
-
-static int battery_cycle_get(struct mtk_battery *gm,
-	struct mtk_battery_sysfs_field_info *attr,
-	int *val)
-{
-	*val = gm->bat_cycle_count;
-	bm_debug("[%s] cycle_count = %d\n", __func__, *val);
-	return 0;
-}
-
 static int reset_set(struct mtk_battery *gm,
 	struct mtk_battery_sysfs_field_info *attr,
 	int val)
@@ -2718,6 +2578,23 @@ static int temp_th_set(struct mtk_battery *gm,
 
 	return 0;
 }
+
+/*TN Begin modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
+static int remaining_cap_get(struct mtk_battery *gm,
+		struct mtk_battery_sysfs_field_info *attr,
+		int *val)
+{
+	int ret = 0;
+
+	ret = oem_pcba_chg_15w_exist();
+	if (ret > 0) {
+		*val = gm->bat_cycle_thr * 10 / 5000;
+	} else {
+		*val = gm->bat_cycle_thr * 10 / 6000;
+	}
+	return 0;
+}
+/*TN End modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
 
 static ssize_t bat_sysfs_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
@@ -2778,7 +2655,9 @@ static struct mtk_battery_sysfs_field_info battery_sysfs_field_tbl[] = {
 	BAT_SYSFS_FIELD_WO(reset, BAT_PROP_FG_RESET),
 	BAT_SYSFS_FIELD_RW(log_level, BAT_PROP_LOG_LEVEL),
 	BAT_SYSFS_FIELD_WO(temp_th, BAT_PROP_TEMP_TH_GAP),
-	BAT_SYSFS_FIELD_RW(battery_cycle,BAT_PROP_BATTERY_CYCLE),
+/*TN Begin modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
+	BAT_SYSFS_FIELD_RO(remaining_cap, BAT_PROP_REMAINING_CAP),
+/*TN End modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
 };
 
 int battery_get_property(enum battery_property bp,
@@ -2977,8 +2856,10 @@ static int system_pm_notify(struct notifier_block *nb,
 	case PM_HIBERNATION_PREPARE:
 	case PM_RESTORE_PREPARE:
 	case PM_SUSPEND_PREPARE:
-		if (bat_psy->changed)
-			return NOTIFY_BAD;
+		if (!gm->disable_bs_psy) {
+			if (bat_psy->changed)
+				return NOTIFY_BAD;
+		}
 		if (!mutex_trylock(&gm->fg_update_lock))
 			return NOTIFY_BAD;
 		gm->in_sleep = true;
@@ -3252,9 +3133,7 @@ int set_shutdown_cond(struct mtk_battery *gm, int shutdown_cond)
 		sdc->shutdown_status.is_overheat = true;
 		mutex_unlock(&sdc->lock);
 		bm_debug("[%s]OVERHEAT shutdown!\n", __func__);
-	#ifdef MTK_BASE
 		kernel_power_off();
-	#endif
 		break;
 	case SOC_ZERO_PERCENT:
 		if (sdc->shutdown_status.is_soc_zero_percent != true) {
@@ -3373,10 +3252,8 @@ static int shutdown_event_handler(struct mtk_battery *gm)
 			tmp_duraction = ktime_to_timespec64(duraction);
 			polling++;
 			if (tmp_duraction.tv_sec >= SHUTDOWN_TIME) {
-			#ifdef MTK_BASE
 				bm_debug("soc zero shutdown\n");
 				kernel_power_off();
-			#endif
 				return next_waketime(polling);
 			}
 		} else if (current_soc > 0) {
@@ -3398,10 +3275,8 @@ static int shutdown_event_handler(struct mtk_battery *gm)
 
 			tmp_duraction = ktime_to_timespec64(duraction);
 			if (tmp_duraction.tv_sec >= SHUTDOWN_TIME) {
-			#ifdef MTK_BASE
 				bm_debug("uisoc one percent shutdown\n");
 				kernel_power_off();
-			#endif
 				return next_waketime(polling);
 			}
 		} else if (now_current > 0 && current_soc > 0) {
@@ -3497,11 +3372,9 @@ static int shutdown_event_handler(struct mtk_battery *gm)
 				tmp_duraction  = ktime_to_timespec64(duraction);
 				ui_zero_time_flag = 1;
 				if (tmp_duraction.tv_sec >= SHUTDOWN_TIME) {
-				#ifdef MTK_BASE
 					bm_debug("low bat shutdown, over %d second\n",
 						SHUTDOWN_TIME);
 					kernel_power_off();
-				#endif
 					return next_waketime(polling);
 				}
 			}
@@ -3586,11 +3459,9 @@ static int power_misc_routine_thread(void *arg)
 		}
 		if (sdd->overheat == true) {
 			sdd->overheat = false;
-		#ifdef MTK_BASE
 			bm_err("%s battery overheat~ power off, ret = %d\n",
 				__func__, ret);
 			kernel_power_off();
-		#endif
 			return 1;
 		}
 	}
@@ -3614,7 +3485,7 @@ static int mtk_power_misc_psy_event(
 				nb, struct shutdown_controller, psy_nb);
 
 			if (gm->cur_bat_temp >= BATTERY_SHUTDOWN_TEMPERATURE) {
-				bm_debug(
+				bm_err(
 					"%d battery temperature >= %d,shutdown",
 					gm->cur_bat_temp, tmp);
 				wake_up_overheat(sdc);
@@ -3655,43 +3526,36 @@ int battery_psy_init(struct platform_device *pdev)
 	gm->gauge = gauge;
 	mutex_init(&gm->ops_lock);
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	gm->usb_data.chg_psy = devm_power_supply_get_by_phandle(&pdev->dev,
-							 "sgm4154x-charger");
-	if (IS_ERR_OR_NULL(gm->usb_data.chg_psy))
-		bm_err("[BAT_probe] %s: fail to get usb_vbus chg_psy !!\n", __func__);
-
-	usb_service_data_init(gm);
-	gm->usb_data.psy =
-		power_supply_register(
-			&(pdev->dev), &gm->usb_data.psd, &gm->usb_data.psy_cfg);
-	if (IS_ERR(gm->usb_data.psy)) {
-		bm_err("[BAT_probe] power_supply_register USB Fail !!\n");
-		ret = PTR_ERR(gm->usb_data.psy);
-		return ret;
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+	gm->bs_data.chg_psy = power_supply_get_by_name("ext_charger_type");
+	if (IS_ERR_OR_NULL(gm->bs_data.chg_psy)) {
+		bm_err("%s get ext_charger_type chg psy failed\n", __func__);
 	}
-#endif
+#else
 	gm->bs_data.chg_psy = devm_power_supply_get_by_phandle(&pdev->dev,
 							 "charger");
-	if (IS_ERR_OR_NULL(gm->bs_data.chg_psy)) {
-		gm->bs_data.chg_psy = devm_power_supply_get_by_phandle(&pdev->dev,
-								"charger_2nd");
-		if (IS_ERR_OR_NULL(gm->bs_data.chg_psy)) {
-			bm_err("[BAT_probe] %s: fail to get chg_psy !!\n", __func__);
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+	if (IS_ERR_OR_NULL(gm->bs_data.chg_psy))
+		bm_err("[BAT_probe] %s: fail to get chg_psy !!\n", __func__);
+
+	gm->disable_bs_psy = of_property_read_bool(
+		pdev->dev.of_node, "disable-bspsy");
+
+	if (!gm->disable_bs_psy) {
+		battery_service_data_init(gm);
+		gm->bs_data.psy =
+			power_supply_register(
+				&(pdev->dev), &gm->bs_data.psd, &gm->bs_data.psy_cfg);
+		if (IS_ERR(gm->bs_data.psy)) {
+			bm_err("[BAT_probe] power_supply_register Battery Fail !!\n");
+			ret = PTR_ERR(gm->bs_data.psy);
+			return ret;
 		}
+		bm_err("[BAT_probe] power_supply_register Battery Success !!\n");
 	}
-	
-	bm_err("%s charger psy name: %s\n", __func__, gm->bs_data.chg_psy->desc->name);
-	battery_service_data_init(gm);
-	gm->bs_data.psy =
-		power_supply_register(
-			&(pdev->dev), &gm->bs_data.psd, &gm->bs_data.psy_cfg);
-	if (IS_ERR(gm->bs_data.psy)) {
-		bm_err("[BAT_probe] power_supply_register Battery Fail !!\n");
-		ret = PTR_ERR(gm->bs_data.psy);
-		return ret;
-	}
-	bm_err("[BAT_probe] power_supply_register Battery Success !!\n");
+
 	return 0;
 }
 
@@ -3771,144 +3635,6 @@ void fg_check_lk_swocv(struct device *dev,
 		__func__, gm->ptim_lk_v, gm->ptim_lk_i, gm->pl_shutdown_time);
 }
 
-/*===================moto chg tcmd interface========================*/
-//extern int gauge_get_hwocv(void);
-
-static int battery_tcmd_read_bat_temp(void *input, int* val)
-{
-	struct mtk_battery *gm = input;
-	*val = force_get_tbat(gm, true) * 10;
-	bm_info("[%s bat temp = %d\n", __func__,*val);
-	return 0;
-}
-
-#if 0
-static int battery_tcmd_read_bat_id(void *input, int* val)
-{
-	int id_volt = 0;
-	int ret = -1;
-	int auxadc_voltage = 0;
-	struct iio_channel *channel;
-	struct device_node *batterty_node;
-	struct platform_device *battery_dev;
-
-	batterty_node = of_find_node_by_name(NULL, "battery");
-	if (!batterty_node) {
-		bm_err("[%s] of_find_node_by_name fail\n", __func__);
-		return ret;
-	}
-
-	battery_dev = of_find_device_by_node(batterty_node);
-	if (!battery_dev) {
-		bm_err("[%s] of_find_device_by_node fail\n", __func__);
-		return ret;
-	}
-
-	channel = iio_channel_get(&(battery_dev->dev), "batteryID-channel");
-	if (IS_ERR(channel)) {
-		ret = PTR_ERR(channel);
-		bm_err("[%s] iio channel not found %d\n",
-		__func__, ret);
-		return ret;
-	}
-
-	if (channel)
-		ret = iio_read_channel_processed(channel, &auxadc_voltage);
-
-
-	if (ret <= 0) {
-		bm_err("[%s] iio_read_channel_processed failed\n", __func__);
-		return ret;
-	}
-
-	bm_err("[%s]auxadc_voltage is %d\n", __func__, auxadc_voltage);
-	id_volt = auxadc_voltage * 1500 / 4096;
-	bm_err("[%s]battery_id_voltage is %d\n", __func__, id_volt);
-
-	*val = id_volt;
-	return 0;
-}
-#endif
-static int battery_tcmd_read_bat_voltage(void *input, int* val)
-{
-	//struct mtk_battery *gm = input;
-	int bat_batt_vol,ret;
-	ret = gauge_get_property(GAUGE_PROP_BATTERY_VOLTAGE, &bat_batt_vol);
-	if (ret == -EHOSTDOWN)
-		bm_err("[%s] bat voltage read failed\n", __func__);
-	else {
-		*val = bat_batt_vol * 1000;
-	}
-	bm_info("[%s bat val = %d\n", __func__,*val);
-	return 0;
-}
-
-static int battery_tcmd_read_bat_ocv(void *input, int* val)
-{
-	//struct mtk_battery *gm = input;
-	*val =  gauge_get_int_property(GAUGE_PROP_BOOT_ZCV) / 10;//gauge_get_hwocv unit mV * 10
-	bm_info("[%s hwocv = %d\n", __func__,*val);
-	return 0;
-}
-
-static int battery_tcmd_get_bat_cycle(void *input, int* val)
-{
-	struct mtk_battery *gm = input;
-	int ret = 0;
-
-	if (!gm) {
-		ret = -1;
-		bm_info("[%s gm is null\n", __func__);
-	} else {
-		*val = gm->bat_cycle;
-	}
-
-	return ret;
-}
-
-static int battery_tcmd_set_bat_cycle(void *input, int val)
-{
-	struct mtk_battery *gm = input;
-	int ret = 0;
-
-	if (!gm) {
-		ret = -1;
-		bm_err("[%s gm is null\n", __func__);
-		goto end;
-	}
-
-	if (val == 0) {
-		gm->is_reset_battery_cycle = true;
-		wakeup_fg_algo(gm, FG_INTR_BAT_CYCLE);
-	} else {
-		gm->is_reset_battery_cycle = false;
-	}
-
-end:
-	return ret;
-}
-
-
-static int battery_tcmd_register_tcmd(struct mtk_battery *gm)
-{
-	int ret;
-	struct battery_data *data = &gm->bs_data;
-	data->bat_tcmd_client.data = gm;
-	data->bat_tcmd_client.client_id = MOTO_CHG_TCMD_CLIENT_BAT;
-
-	data->bat_tcmd_client.get_bat_temp = battery_tcmd_read_bat_temp;
-	//data->bat_tcmd_client.get_bat_id = battery_tcmd_read_bat_id;
-	data->bat_tcmd_client.get_bat_voltage = battery_tcmd_read_bat_voltage;
-	data->bat_tcmd_client.get_bat_ocv = battery_tcmd_read_bat_ocv;
-	data->bat_tcmd_client.get_bat_cycle = battery_tcmd_get_bat_cycle;
-	data->bat_tcmd_client.set_bat_cycle = battery_tcmd_set_bat_cycle;
-
-	ret = moto_chg_tcmd_register(&data->bat_tcmd_client);
-
-	return ret;
-}
-/*===================moto chg tcmd interface end======================*/
-
 int battery_init(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -3968,7 +3694,9 @@ int battery_init(struct platform_device *pdev)
 #endif /* CONFIG_PM */
 
 	fg_drv_thread_hrtimer_init(gm);
-	battery_sysfs_create_group(gm->bs_data.psy);
+
+	if (!gm->disable_bs_psy)
+		battery_sysfs_create_group(gm->bs_data.psy);
 
 	/* for gauge hal hw ocv */
 	gm->bs_data.bat_batt_temp = force_get_tbat(gm, true);
@@ -3986,7 +3714,6 @@ int battery_init(struct platform_device *pdev)
 		bm_err("[%s]: enable Kernel mode Gauge\n", __func__);
 	}
 
-	battery_tcmd_register_tcmd(gm);
 	return 0;
 }
 

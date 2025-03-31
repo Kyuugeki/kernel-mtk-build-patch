@@ -29,7 +29,7 @@
 #if IS_ENABLED(CONFIG_MTK_AEE_FEATURE)
 #include <mt-plat/aee.h>
 #endif
-
+#include <linux/suspend.h>
 
 #include "ccci_hif_dpmaif_v1.h"
 #include "dpmaif_reg_v1.h"
@@ -181,6 +181,7 @@ static int dpmaif_wait_resume_done(void)
 			CCCI_NORMAL_LOG(-1, TAG,
 				"[%s] warning: suspend_flag = 1; (cnt: %d)",
 				__func__, cnt);
+			pm_system_wakeup();
 			return -1;
 		}
 	}
@@ -1041,7 +1042,6 @@ static int dpmaif_net_rx_push_thread(void *arg)
 #else
 		ccci_port_recv_skb(hif_ctrl->md_id, hif_ctrl->hif_id, skb,
 			CLDMA_NET_DATA);
-		//ccci_md_recv_skb(hif_ctrl->md_id, hif_ctrl->hif_id, skb);
 		count++;
 #endif
 
@@ -4646,6 +4646,10 @@ static int dpmaif_pre_stop(unsigned char hif_id)
 	if (hif_id != DPMAIF_HIF_ID)
 		return -1;
 
+	if (dpmaif_ctrl->dpmaif_state == HIFDPMAIF_STATE_PWROFF
+		|| dpmaif_ctrl->dpmaif_state == HIFDPMAIF_STATE_MIN)
+		return 0;
+
 	dpmaif_stop_hw();
 
 	return 0;
@@ -4887,8 +4891,11 @@ static inline int dpmaif_set_skb_data_to_smem_drb(struct dpmaif_tx_queue *txq,
 		drb_pd->c_bit = c_bit;
 		drb_pd->data_len = data_len;
 		drb_pd->p_data_addr = phy_addr & 0xFFFFFFFF;
+#if IS_ENABLED(CONFIG_ARM64)
 		drb_pd->data_addr_ext = (phy_addr >> 32) & 0xFF;
-
+#else
+		drb_pd->data_addr_ext = 0;
+#endif
 		drb_skb = &smem_drb_skb[cur_idx];
 		drb_skb->skb = skb;
 		drb_skb->phy_addr = phy_addr;
@@ -5132,20 +5139,35 @@ static int dpmaif_tx_sw_solution_init(void)
 	if (dpmaif_ctrl->smem_base_vir == NULL || dpmaif_ctrl->smem_base_phy == 0 ||
 				dpmaif_ctrl->smem_size <= 0) {
 		dpmaif_ctrl->tx_sw_solution_enable = 0;
+#if IS_ENABLED(CONFIG_PHYS_ADDR_T_64BIT)
 		CCCI_ERROR_LOG(-1, TAG,
-			"[%s] error: fail. smem_base: %p(%llx); smem_size: %u\n",
+			"[%s] error: fail. smem_base: %p(0x%llx); smem_size: %u\n",
 			__func__, dpmaif_ctrl->smem_base_vir, dpmaif_ctrl->smem_base_phy,
 			dpmaif_ctrl->smem_size);
+#else
+		CCCI_ERROR_LOG(-1, TAG,
+			"[%s] error: fail. smem_base: %p(0x%lx); smem_size: %u\n",
+			__func__, dpmaif_ctrl->smem_base_vir, dpmaif_ctrl->smem_base_phy,
+			dpmaif_ctrl->smem_size);
+#endif
 		return 0;
 	}
 
 	dpmaif_ctrl->tx_sw_solution_enable = 1;
 
+#if IS_ENABLED(CONFIG_PHYS_ADDR_T_64BIT)
 	CCCI_NORMAL_LOG(-1, TAG,
-		"[%s] tx_sw_solution_enable: %u; smem_base: %p(0x%llX); smem_size: %u\n",
+		"[%s] tx_sw_solution_enable: %u; smem_base: %p(0x%llx); smem_size: %u\n",
 		__func__, dpmaif_ctrl->tx_sw_solution_enable,
 		dpmaif_ctrl->smem_base_vir, dpmaif_ctrl->smem_base_phy,
 		dpmaif_ctrl->smem_size);
+#else
+	CCCI_NORMAL_LOG(-1, TAG,
+		"[%s] tx_sw_solution_enable: %u; smem_base: %p(0x%lx); smem_size: %u\n",
+		__func__, dpmaif_ctrl->tx_sw_solution_enable,
+		dpmaif_ctrl->smem_base_vir, dpmaif_ctrl->smem_base_phy,
+		dpmaif_ctrl->smem_size);
+#endif
 
 	INIT_DELAYED_WORK(&dpmaif_ctrl->smem_drb_work, &dpmaif_smem_tx_done);
 	dpmaif_ctrl->smem_worker = alloc_workqueue("smem_ul_worker",
@@ -5378,7 +5400,7 @@ int ccci_dpmaif_resume_noirq_v1(struct device *dev)
 			WAKE_SRC_HIF_DPMAIF, 0, 0, 0, 0, &res);
 
 	CCCI_NORMAL_LOG(-1, TAG,
-		"[%s] resume_cnt: %u; flag_1=0x%llx, flag_2=0x%llx, flag_3=0x%llx, flag_4=0x%llx\n",
+		"[%s] resume_cnt: %u; flag_1=0x%lx, flag_2=0x%lx, flag_3=0x%lx, flag_4=0x%lx\n",
 		__func__, g_resume_cnt, res.a0, res.a1, res.a2, res.a3);
 
 	if ((!res.a0) && (res.a1 == WAKE_SRC_HIF_DPMAIF))

@@ -113,7 +113,6 @@ struct mtk_pd {
 	int input_current2;
 	int charging_current1;
 	int charging_current2;
-	int mmi_fcc;
 
 	/* dtsi setting */
 	int vbus_l;
@@ -153,7 +152,7 @@ struct mtk_pd {
 	bool is_connect;
 	bool is_enabled;
 
-
+	int enable_inductor_protect;
 };
 
 extern int pd_hal_init_hardware(struct chg_alg_device *alg);

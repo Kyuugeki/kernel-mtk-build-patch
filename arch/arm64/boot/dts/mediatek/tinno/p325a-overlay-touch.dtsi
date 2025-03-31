@@ -1,0 +1,69 @@
+/*[TN.NJDC] touch overlay file.start*/
+&spi2 {
+       status = "okay";
+       #address-cells = <1>;
+       #size-cells = <0>;
+       ilitek_spi@0 {
+              compatible = "focaltech,fts", "mediatek,cap_touch";
+              reg = <0x0>;
+              interrupt-parent = <&pio>;
+              interrupts = <0 IRQ_TYPE_EDGE_FALLING 0 0>;
+              focaltech,irq-gpio = <&pio 0 0x2>;
+              focaltech,reset-gpio = <&pio 23 0x0>;
+              focaltech,max-touch-number = <10>;
+              focaltech,display-coords =  <0 0 720 1612>;
+
+              touch,irq-gpio = <&pio 0 0x2>;
+              touch,reset-gpio = <&pio 23 0x0>;
+       };
+};
+
+&pio {
+       ctp_pins_default: eint0default {
+       };
+       ctp_pins_eint_as_int: eint@0 {
+               pins_cmd_dat {
+                       pinmux = <PINMUX_GPIO0__FUNC_GPIO0>;
+                       slew-rate = <0>;
+                       bias-disable;
+               };
+       };
+       ctp_pins_eint_output0: eintoutput0 {
+               pins_cmd_dat {
+                       pinmux = <PINMUX_GPIO0__FUNC_GPIO0>;
+                       slew-rate = <1>;
+                       output-low;
+               };
+       };
+       ctp_pins_eint_output1: eintoutput1 {
+               pins_cmd_dat {
+                       pinmux = <PINMUX_GPIO0__FUNC_GPIO0>;
+                       slew-rate = <1>;
+                       output-high;
+               };
+       };
+       ctp_pins_rst_output0: rstoutput0 {
+               pins_cmd_dat {
+                       pinmux = <PINMUX_GPIO23__FUNC_GPIO23>;
+                       slew-rate = <1>;
+                       output-low;
+               };
+       };
+       ctp_pins_rst_output1: rstoutput1 {
+               pins_cmd_dat {
+                       pinmux = <PINMUX_GPIO23__FUNC_GPIO23>;
+                       slew-rate = <1>;
+                       output-high;
+               };
+       };
+       ctp_pins_spi_mode: spimode_default {
+               pins_cmd_dat {
+                       pinmux = <PINMUX_GPIO28__FUNC_SPI2_MI>,
+                               <PINMUX_GPIO25__FUNC_SPI2_CSB>,
+                               <PINMUX_GPIO26__FUNC_SPI2_MO>,
+                               <PINMUX_GPIO27__FUNC_SPI2_CLK>;
+                       drive-strength = <4>;
+               };
+       };
+};
+/*[TN.NJDC] touch overlay file.end*/

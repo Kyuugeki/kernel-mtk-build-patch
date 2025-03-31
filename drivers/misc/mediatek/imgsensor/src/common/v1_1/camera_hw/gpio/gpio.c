@@ -17,24 +17,13 @@ struct GPIO_PINCTRL gpio_pinctrl_list_cam[
 	{"ldo_vcama_0"},
 	{"ldo_vcama1_1"},
 	{"ldo_vcama1_0"},
-#if defined(CONFIG_MOT_CANCUNF_CAMERA_PROJECT)  || defined(CONFIG_MOT_DEVONN_CAMERA_PROJECT) || defined(CONFIG_MOT_DEVONF_CAMERA_PROJECT)
-	{"ldo_vcamaf_1"},
-	{"ldo_vcamaf_0"},
-#endif
+	{"ldo_vcamafvdd_1"},
+	{"ldo_vcamafvdd_0"},
 	{"ldo_vcamd_1"},
 	{"ldo_vcamd_0"},
-#if defined(CONFIG_MOT_CANCUNF_CAMERA_PROJECT)
-	{"ldo_vcamd1_1"},
-	{"ldo_vcamd1_0"},
-#endif
 	{"ldo_vcamio_1"},
 	{"ldo_vcamio_0"},
 };
-
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-extern bool devonf_vcamio_reset;
-static int vcamio_cnt = 0;
-#endif
 
 /* for mipi switch platform */
 struct GPIO_PINCTRL gpio_pinctrl_list_switch[
@@ -73,52 +62,11 @@ static enum IMGSENSOR_RETURN gpio_init(
 			gpio_pinctrl_list_cam[i].ppinctrl_lookup_names;
 
 			if (lookup_names) {
-#if defined(CONFIG_MOT_DEVONN_CAMERA_PROJECT)
-				if (strncmp(lookup_names, "ldo_vcamio", strlen("ldo_vcamio")) == 0)
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					0,//camera ldo io all
-					lookup_names);
-				else if ((j != 0)&&(strncmp(lookup_names, "ldo_vcama", strlen("ldo_vcama")) == 0))
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					1,//camera 1,2,4 avdd
-					lookup_names);
-/*				else if ((j != 0)&&(strncmp(lookup_names, "pnd", strlen("pnd")) == 0))
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					0,//camera 0,1 Dvdd
-					lookup_names);*/
-				else
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					j,
-					lookup_names);
-#elif defined(CONFIG_MOT_DEVONF_CAMERA_PROJECT)
-				if (strncmp(lookup_names, "ldo_vcamio", strlen("ldo_vcamio")) == 0){
-					ret = snprintf(str_pinctrl_name,
-					sizeof(str_pinctrl_name),
-					"cam%d_%s",
-					0,//camera ldo io all
-					lookup_names);
-				} else{
 				ret = snprintf(str_pinctrl_name,
 				sizeof(str_pinctrl_name),
 				"cam%d_%s",
 				j,
 				lookup_names);
-				}
-#else
-				ret = snprintf(str_pinctrl_name,
-				sizeof(str_pinctrl_name),
-				"cam%d_%s",
-				j,
-				lookup_names);
-#endif
 				if (ret < 0)
 					PK_DBG("NOITCE: %s, snprintf err, %d\n",
 						__func__,
@@ -185,16 +133,6 @@ static enum IMGSENSOR_RETURN gpio_set(
 		pin_state > IMGSENSOR_HW_PIN_STATE_LEVEL_HIGH)
 		return IMGSENSOR_RETURN_ERROR;
 
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-	if (pin == IMGSENSOR_HW_PIN_DOVDD) {
-		if (pin_state == IMGSENSOR_HW_PIN_STATE_LEVEL_0) {
-			vcamio_cnt--;
-		} else {
-			vcamio_cnt++;
-		}
-	}
-#endif
-
 	sensor_idx_uint = sensor_idx;
 
 	gpio_state = (pin_state > IMGSENSOR_HW_PIN_STATE_LEVEL_0)
@@ -212,18 +150,6 @@ static enum IMGSENSOR_RETURN gpio_set(
 		ppinctrl_state =
 			pgpio->ppinctrl_state_cam[sensor_idx_uint][
 			(pin_index << 1) + gpio_state];
-
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-	if ((pin == IMGSENSOR_HW_PIN_DOVDD) && (pin_state == IMGSENSOR_HW_PIN_STATE_LEVEL_0)) {
-		if (devonf_vcamio_reset == true) {
-			vcamio_cnt = 0;
-			devonf_vcamio_reset = false;
-		}
-		if (vcamio_cnt > 0) {
-			return IMGSENSOR_RETURN_SUCCESS;
-		}
-	}
-#endif
 
 	mutex_lock(pgpio->pgpio_mutex);
 

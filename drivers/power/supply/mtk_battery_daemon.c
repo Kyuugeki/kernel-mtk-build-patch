@@ -211,6 +211,13 @@ void fg_daemon_send_data(struct mtk_battery *gm,
 				struct fgd_cmd_param_t_custom),
 				prcv->total_size);
 			}
+			if ((prcv->idx + prcv->size) >
+				sizeof(struct fgd_cmd_param_t_custom)) {
+				bm_err("size is different %d size %d idx %d\n",
+					(int)sizeof(struct fgd_cmd_param_t_custom),
+					prcv->size, prcv->idx);
+				return;
+			}
 
 			ptr = (char *)&gm->fg_data;
 			memcpy(&ptr[prcv->idx],
@@ -313,6 +320,16 @@ void fg_daemon_get_data(int cmd,
 	{
 		char *ptr;
 
+		if (prcv->idx + prcv->size >
+			sizeof(struct fuel_gauge_custom_data)) {
+			bm_err("%s size is different %d %d %d\n",
+			__func__,
+			(int)sizeof(
+			struct fuel_gauge_custom_data),
+			prcv->idx, prcv->size);
+			return;
+		}
+
 		if (sizeof(struct fuel_gauge_custom_data)
 			!= prcv->total_size) {
 			bm_err("%s size is different %d %d\n",
@@ -340,6 +357,16 @@ void fg_daemon_get_data(int cmd,
 	case FG_DAEMON_CMD_GET_CUSTOM_TABLE:
 		{
 			char *ptr;
+
+			if (prcv->idx + prcv->size >
+				sizeof(struct fuel_gauge_table_custom_data)) {
+				bm_err("%s size is different %d %d %d\n",
+				__func__,
+				(int)sizeof(
+				struct fuel_gauge_table_custom_data),
+				prcv->idx, prcv->size);
+				return;
+			}
 
 			if (sizeof(struct fuel_gauge_table_custom_data)
 				!= prcv->total_size) {
@@ -391,7 +418,9 @@ void fg_custom_data_check(struct mtk_battery *gm)
 
 	p = &gm->fg_cust_data;
 	fg_table_cust_data = &gm->fg_table_cust_data;
-	fgauge_get_profile_id();
+/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+	fgauge_get_profile_id(gm);
+/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
 
 	bm_err("FGLOG MultiGauge0[%d] BATID[%d] pmic_min_vol[%d,%d,%d,%d,%d]\n",
 		p->multi_temp_gauge0, gm->battery_id,
@@ -2695,6 +2724,10 @@ static void mtk_battery_daemon_handler(struct mtk_battery *gm, void *nl_data,
 				gm->ptim_lk_v, ptim_bat_vol,
 				gm->ptim_lk_i, ptim_R_curr, val.intval);
 		}
+		/* bat_vol between 1.8V to 5V change unit to 0.1mV */
+		if (ptim_bat_vol > 1800 && ptim_bat_vol < 5000)
+			ptim_bat_vol = ptim_bat_vol * 10;
+
 		ptim_vbat = ptim_bat_vol;
 		ptim_i = ptim_R_curr;
 		ret_msg->fgd_data_len += sizeof(ptim_vbat);
@@ -2714,12 +2747,28 @@ static void mtk_battery_daemon_handler(struct mtk_battery *gm, void *nl_data,
 	{
 		/* todo */
 		int is_charger_exist = 0;
-
-		if (gm->bs_data.bat_status == POWER_SUPPLY_STATUS_CHARGING ||
-			gm->bs_data.bat_status == POWER_SUPPLY_STATUS_FULL)
+/* TN Begin modified by wenfeng.qi/809603 20241119 CR/EKFOGO4G-10773 */
+#if IS_ENABLED(CONFIG_OEM_TINNO_CHARGER)
+		union power_supply_propval online = {0};
+		if (!IS_ERR_OR_NULL(gm->bs_data.chg_psy)) {
+			power_supply_get_property(gm->bs_data.chg_psy, POWER_SUPPLY_PROP_ONLINE, &online);
+			if (online.intval)
+				is_charger_exist = true;
+			else
+				is_charger_exist = false;
+		} else {
+			if (gm->bs_data.bat_status == POWER_SUPPLY_STATUS_CHARGING)
+				is_charger_exist = true;
+			else
+				is_charger_exist = false;
+		}
+#else
+		if (gm->bs_data.bat_status == POWER_SUPPLY_STATUS_CHARGING)
 			is_charger_exist = true;
 		else
 			is_charger_exist = false;
+#endif
+/* TN End modified by wenfeng.qi/809603 20241119 CR/EKFOGO4G-10773 */
 
 		ret_msg->fgd_data_len += sizeof(is_charger_exist);
 		memcpy(ret_msg->fgd_data,
@@ -2884,6 +2933,10 @@ static void mtk_battery_daemon_handler(struct mtk_battery *gm, void *nl_data,
 
 		fg_coulomb = gauge_get_int_property(GAUGE_PROP_COULOMB);
 
+		if (((int)sizeof(msg->fgd_data[0])) == 0) {
+			bm_err("[fr] FG_DAEMON_CMD_SET_FG_BAT_INT1_GAP is not filled\n");
+			break;
+		}
 		memcpy(&gm->coulomb_int_gap,
 			&msg->fgd_data[0], sizeof(gm->coulomb_int_gap));
 
@@ -4379,9 +4432,7 @@ void sw_check_bat_plugout(struct mtk_battery *gm)
 			gm->bs_data.bat_status = POWER_SUPPLY_STATUS_UNKNOWN;
 			wakeup_fg_algo(gm, FG_INTR_BAT_PLUGOUT);
 			battery_update(gm);
-		#ifdef MTK_BASE
 			kernel_power_off();
-		#endif
 		}
 	}
 }
@@ -4590,9 +4641,7 @@ static irqreturn_t bat_plugout_irq(int irq, void *data)
 		wakeup_fg_algo(gm, FG_INTR_BAT_PLUGOUT);
 		battery_update(gm);
 		fg_int_event(gm, EVT_INT_BAT_PLUGOUT);
-	#ifdef MTK_BASE
 		kernel_power_off();
-	#endif
 	}
 	return IRQ_HANDLED;
 }
@@ -4803,13 +4852,21 @@ void fg_update_sw_iavg(struct mtk_battery *gm)
 	dtime = ktime_sub(ctime, gm->sw_iavg_time);
 	diff = ktime_to_timespec64(dtime);
 
-	bm_debug("[%s]diff time:%ld\n",
-		__func__,
-		diff.tv_sec);
+	bm_debug("[%s]diff time:%ld\n", __func__, diff.tv_sec);
 	if (diff.tv_sec >= 60) {
 		fg_coulomb = gauge_get_int_property(GAUGE_PROP_COULOMB);
+#if defined(__LP64__) || defined(_LP64)
 		gm->sw_iavg = (fg_coulomb - gm->sw_iavg_car)
 			* 3600 / diff.tv_sec;
+#else
+		if (diff.tv_sec < 65535)
+			gm->sw_iavg = (fg_coulomb - gm->sw_iavg_car)
+			* 3600 / (int)(diff.tv_sec);
+		else {
+			gm->sw_iavg = 0;
+			bm_err("[%s]diff.tv_sec:%d\n", __func__, diff.tv_sec);
+		}
+#endif
 		gm->sw_iavg_time = ctime;
 		gm->sw_iavg_car = fg_coulomb;
 		version = gauge_get_int_property(GAUGE_PROP_HW_VERSION);
@@ -4853,8 +4910,10 @@ int wakeup_fg_daemon(unsigned int flow_state, int cmd, int para1)
 			if (size > PAGE_SIZE)
 				fgd_msg = vmalloc(size);
 
-			if (fgd_msg == NULL)
+			if (fgd_msg == NULL) {
+				bm_err(" %s: request memory fail !!\n", __func__);
 				return -1;
+			}
 		}
 		Intr_Number_to_Name(intr_name, flow_state);
 
@@ -4872,9 +4931,10 @@ int wakeup_fg_daemon(unsigned int flow_state, int cmd, int para1)
 		kvfree(fgd_msg);
 
 		return 0;
-	} else
+	} else {
+		bm_err(" %s: gm->fgd_pid exception, valule is %d !!\n", __func__, gm->fgd_pid);
 		return -1;
-
+	}
 }
 
 void fg_drv_update_daemon(struct mtk_battery *gm)
@@ -5009,8 +5069,10 @@ int mtk_battery_daemon_init(struct platform_device *pdev)
 	gauge = dev_get_drvdata(&pdev->dev);
 	gm = gauge->gm;
 
-	if (is_daemon_support(gm) == false)
+	if (is_daemon_support(gm) == false) {
+		bm_err(" %s: daemon not support !!\n", __func__);
 		return -EIO;
+	}
 
 	if (gm->mtk_battery_sk == NULL) {
 		bm_err("[%s]netlink_kernel_create error\n", __func__);

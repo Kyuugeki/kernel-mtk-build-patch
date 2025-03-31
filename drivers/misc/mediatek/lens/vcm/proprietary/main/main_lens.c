@@ -20,10 +20,8 @@
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 #endif
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-#include "linux/pm_wakeup.h"
-#endif
-
+#include <linux/sched.h>
+#include <linux/kthread.h>
 /* kernel standard */
 #include <linux/regulator/consumer.h>
 #include <linux/pinctrl/consumer.h>
@@ -69,13 +67,6 @@ static struct i2c_board_info kd_lens_dev __initdata = {
 #define LOG_INF(format, args...)
 #endif
 
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-static unsigned long af_len = 1;
-static int Open_holder = 0;
-static int Close_holder = 0;
-static struct wakeup_source vib_wakelock;
-#endif
-
 /* OIS/EIS Timer & Workqueue */
 static struct workqueue_struct *ois_workqueue;
 static struct work_struct ois_work;
@@ -89,34 +80,13 @@ static struct stAF_OisPosInfo OisPosInfo;
 /* ------------------------- */
 
 static struct stAF_DrvList g_stAF_DrvList[MAX_NUM_OF_LENS] = {
-#if defined(CONFIG_MOT_DEVONN_CAMERA_PROJECT)
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	{1, MOT_DEVONN_AFDRV_DW9800VAF, MOT_DEVONN_DW9800VAF_SetI2Cclient_Main, MOT_DEVONN_DW9800VAF_Ioctl_Main,
-        MOT_DEVONN_DW9800VAF_Release_Main, MOT_DEVONN_DW9800VAF_GetFileName_Main, NULL, VIB_ResetPos},
-#else
-	{1, MOT_DEVONN_AFDRV_DW9800VAF, MOT_DEVONN_DW9800VAF_SetI2Cclient_Main, MOT_DEVONN_DW9800VAF_Ioctl_Main,
-	MOT_DEVONN_DW9800VAF_Release_Main, MOT_DEVONN_DW9800VAF_GetFileName_Main, NULL},
-#endif
-#elif defined(CONFIG_MOT_DEVONF_CAMERA_PROJECT)
-	{1, MOT_DEVONF_AFDRV_GT9764, MOT_DEVONF_GT9764_SetI2CClient, MOT_DEVONF_GT9764_Ioctl,
-	MOT_DEVONF_GT9764_Release, MOT_DEVONF_GT9764_GetFileName, NULL},
-#elif defined(CONFIG_MOT_CANCUNF_CAMERA_PROJECT)
-	{1, MOT_CANCUNF_AFDRV_AW86006, MOT_CANCUNF_AW86006_SetI2Cclient, MOT_CANCUNF_AW86006_Ioctl,
-	MOT_CANCUNF_AW86006_Release, MOT_CANCUNF_AW86006_GetFileName, NULL},
-#else
-//Begin: Add lens driver for Vicky
-	{1, MOT_VICKY_AFDRV_GT9764, MOT_VICKY_GT9764_SetI2CClient, MOT_VICKY_GT9764_Ioctl,
-	MOT_VICKY_GT9764_Release, MOT_VICKY_GT9764_GetFileName, NULL},
-//End
-#endif
+	{1, AFDRV_GT9764AF, GT9764AF_SetI2Cclient, GT9764AF_Ioctl,
+	GT9764AF_Release, GT9764AF_GetFileName, NULL, GT9764AF_GetCurrentPos},
 };
 
 static struct stAF_DrvList *g_pstAF_CurDrv;
-
 static spinlock_t g_AF_SpinLock;
-
 static int g_s4AF_Opened;
-
 static struct i2c_client *g_pstAF_I2Cclient;
 
 static dev_t g_AF_devno;
@@ -132,6 +102,177 @@ static struct pinctrl_state *vcamaf_pio_off;
 #define CAMAF_PMIC     "camaf_m1_pmic"
 #define CAMAF_GPIO_ON  "camaf_m1_gpio_on"
 #define CAMAF_GPIO_OFF "camaf_m1_gpio_off"
+
+#define AF_RESONANCE_SCHEME
+#ifdef AF_RESONANCE_SCHEME
+static void camaf_power_init(void);
+static void camaf_power_on(void);
+static void camaf_power_off(void);
+static int s4AF_WriteReg(u16 a_u2Data);
+#define GT9764AF_SLAVE_ADDR 0x18
+#define AF_NOISE_ELIMINATION_POS        0
+
+static spinlock_t vibrate_lock;
+static struct work_struct vibrate_work;
+static void af_noise_vibrate_work(struct work_struct *work);
+static struct work_struct vibrate_stop_work;
+static void af_stop_vibrate_work(struct work_struct *work);
+
+volatile static int g_VibeInfoCnt = 11;
+volatile static int af_noise_start = 0, af_noise_stop = 0, af_noise_pownon_flag = 0;
+
+static struct hrtimer my_timer;
+static enum hrtimer_restart my_timer_func(struct hrtimer *timer)
+{
+	g_VibeInfoCnt--;
+	//LOG_INF("my_timer_func.af_noise_stop=0x%x,g_VibeInfoCnt=%d\n",af_noise_stop,g_VibeInfoCnt);
+	if ((g_VibeInfoCnt < 10) && (af_noise_stop == 0xaa)) {
+		//if(af_noise_stop == 0xaa) {
+
+			schedule_work(&vibrate_stop_work);
+		//}
+		return HRTIMER_NORESTART;
+	}
+	hrtimer_forward_now(timer, ktime_set(1000 / 1000,(1000 % 1000) * 1000000));
+	return HRTIMER_RESTART;
+}
+
+static int __init my_timer_init(void)
+{
+	printk("Fogo af Resonance scheme %s enter!\n", __func__);
+	hrtimer_init(&my_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	my_timer.function = my_timer_func;
+	printk("Fogo af Resonance scheme %s exit!\n", __func__);
+	return 0;
+}
+
+static void af_stop_vibrate_work(struct work_struct *work)
+{
+	spin_lock(&vibrate_lock);
+	printk("Fogo af Resonance scheme %s enter!\n", __func__);
+	camaf_power_off();
+	af_noise_start = 0;
+	printk("Fogo af Resonance scheme %s enter!\n", __func__);
+	spin_unlock(&vibrate_lock);
+}
+
+static void af_noise_vibrate_work(struct work_struct *work)
+{
+
+	int i=0;
+	int step = 1, temp1 = 512;
+
+	printk("Fogo af Resonance scheme %s starting...!\n", __func__);
+	for(i = 0; i < 200; i++) {
+		if ((temp1 - step) > 400) {
+			step = 20;
+		} else {
+			step = 10;
+		}
+
+		if((temp1 - step) < 10)
+			break;
+		mdelay(2);
+		s4AF_WriteReg(temp1 - step);
+		temp1 = temp1 - step;
+		//printk("af_noise_vibrate_work temp1 value : %d\n", temp1);
+	}
+
+	mdelay(2);
+
+	printk("Fogo af Resonance scheme value : %d\n", AF_NOISE_ELIMINATION_POS);
+	s4AF_WriteReg(AF_NOISE_ELIMINATION_POS);
+
+	spin_lock(&vibrate_lock);
+	//af_noise_start = 0x00;
+	g_VibeInfoCnt = 11;
+	hrtimer_start(&my_timer,
+			ktime_set(1000 / 1000,
+			(1000 % 1000) * 1000000),
+			HRTIMER_MODE_REL);
+	printk("Fogo af Resonance scheme %s stoping...!\n", __func__);
+	spin_unlock(&vibrate_lock);
+}
+
+static int s4AF_WriteReg(u16 a_u2Data)
+{
+	int i4RetValue = 0;
+
+	char puSendCmd[3] = { 0x03, (char)(a_u2Data >> 8),
+		(char)(a_u2Data & 0xFF) };
+
+	g_pstAF_I2Cclient->addr = GT9764AF_SLAVE_ADDR;
+
+	g_pstAF_I2Cclient->addr = g_pstAF_I2Cclient->addr >> 1;
+
+	i4RetValue = i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 3);
+
+	if (i4RetValue < 0) {
+		LOG_INF("I2C send failed!!\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+/******************************************************************************
+ * SYSFS
+ *****************************************************************************/
+/* af_noise strobe sysfs */
+static ssize_t af_noise_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	LOG_INF("Fogo af Resonance scheme show\n");
+	return scnprintf(buf, PAGE_SIZE,"0->off : 1->on\n");
+}
+
+static ssize_t af_noise_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	int temp;
+	LOG_INF("Fogo af Resonance scheme store\n");
+
+	g_VibeInfoCnt = 11;
+	temp = simple_strtol(buf, NULL, 10);//char to int
+	if(temp == 0) {
+		LOG_INF("Fogo af Resonance scheme disable\n");
+		spin_lock(&g_AF_SpinLock);
+		if (g_s4AF_Opened) {
+			spin_unlock(&g_AF_SpinLock);
+			LOG_INF("The device is opened\n");
+			return -1;
+		}
+		spin_unlock(&g_AF_SpinLock);
+
+		af_noise_stop = 0xaa;
+		if(af_noise_start != 0x00) return size;
+		//camaf_power_off();
+	} else if ((temp == 1) || (temp == 2)) {
+		LOG_INF("Fogo af Resonance scheme enable\n");
+		spin_lock(&g_AF_SpinLock);
+		if (g_s4AF_Opened) {
+			spin_unlock(&g_AF_SpinLock);
+			LOG_INF("The device is opened\n");
+			return -1;
+		}
+		spin_unlock(&g_AF_SpinLock);
+		LOG_INF("af_noise_store.af_noise_start=%d\n",af_noise_start);
+		if (af_noise_start == 0x55) {
+			LOG_INF("...3355\n");
+			return size;
+		}
+		camaf_power_init();
+		camaf_power_on();
+		af_noise_start = 0x55;
+		schedule_work(&vibrate_work);
+	} else {
+		LOG_INF("Fogo af Resonance scheme val is unknow\n");
+	}
+	LOG_INF("Fogo af Resonance scheme store...finish...\n");
+	return size;
+}
+static DEVICE_ATTR_RW(af_noise);
+#endif
 
 static void camaf_power_init(void)
 {
@@ -189,9 +330,15 @@ static void camaf_power_init(void)
 static void camaf_power_on(void)
 {
 	int ret;
-
+#ifdef AF_RESONANCE_SCHEME
+	if (vcamaf_ldo && (af_noise_pownon_flag <= 0)) {
+#else
 	if (vcamaf_ldo) {
+#endif
 		ret = regulator_enable(vcamaf_ldo);
+#ifdef AF_RESONANCE_SCHEME
+	af_noise_pownon_flag = 1;
+#endif
 		LOG_INF("regulator enable (%d)\n", ret);
 	}
 
@@ -204,9 +351,12 @@ static void camaf_power_on(void)
 static void camaf_power_off(void)
 {
 	int ret;
-
-	if (vcamaf_ldo) {
+	LOG_INF("ig_s4AF_Opened (%d)\n", g_s4AF_Opened);
+	if (vcamaf_ldo && g_s4AF_Opened<=0) {
 		ret = regulator_disable(vcamaf_ldo);
+#ifdef AF_RESONANCE_SCHEME
+	af_noise_pownon_flag = 0;
+#endif
 		LOG_INF("regulator disable (%d)\n", ret);
 	}
 
@@ -214,6 +364,9 @@ static void camaf_power_off(void)
 		ret = pinctrl_select_state(vcamaf_pio, vcamaf_pio_off);
 		LOG_INF("pinctrl disable (%d)\n", ret);
 	}
+#ifdef AF_RESONANCE_SCHEME
+	af_noise_stop = 0x55;
+#endif
 }
 
 #ifdef CONFIG_MACH_MT6765
@@ -414,32 +567,7 @@ static long AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
 			}
 		}
 		break;
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	case AFIOC_T_SETOPENER:
-		spin_lock(&g_AF_SpinLock);
-		Open_holder |= a_u4Param;
-		i4RetValue = Open_holder;
-		if(a_u4Param == VIB_HOLD){
-		    spin_unlock(&g_AF_SpinLock);
-			LOG_INF("pm_stay_awake vib_wakelock\n");
-			__pm_stay_awake(&vib_wakelock);
-		}else{
-			spin_unlock(&g_AF_SpinLock);
-		}
-                LOG_INF(" Open_holder = %d\n",Open_holder);
-		break;
-	case AFIOC_T_SETCLOSEER:
-		spin_lock(&g_AF_SpinLock);
-		Close_holder = a_u4Param;
-		Open_holder &= ~a_u4Param;
-		spin_unlock(&g_AF_SpinLock);
-		LOG_INF("Close_holder = %d;Open_holder = %d\n",Close_holder,Open_holder);
-		break;
-	case AFIOC_T_SETVCMPOS:
-		af_len = a_u4Param;
-		LOG_INF("set af_len = %d\n",af_len);
-		break;
-#endif
+
 	default:
 		if (g_pstAF_CurDrv) {
 			if (g_pstAF_CurDrv->pAF_Ioctl)
@@ -476,19 +604,11 @@ static int AF_Open(struct inode *a_pstInode, struct file *a_pstFile)
 	LOG_INF("Start\n");
 
 	spin_lock(&g_AF_SpinLock);
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	Close_holder = NO_HOLD;
-	if(g_s4AF_Opened  == 1){
-		spin_unlock(&g_AF_SpinLock);
-		return 0;
-	}
-#else
 	if (g_s4AF_Opened) {
 		spin_unlock(&g_AF_SpinLock);
 		LOG_INF("The device is opened\n");
 		return -EBUSY;
 	}
-#endif
 	g_s4AF_Opened = 1;
 	spin_unlock(&g_AF_SpinLock);
 
@@ -516,48 +636,64 @@ static int AF_Open(struct inode *a_pstInode, struct file *a_pstFile)
 /* 2.Shut down the device on last close. */
 /* 3.Only called once on last time. */
 /* Q1 : Try release multiple times. */
+struct RemoveNoiseParam {
+    struct inode *a_pstInode;
+    struct file  *a_pstFile;
+};
+
+static int taskRemoveNoise(void *param)
+{
+    struct inode *a_pstInode = ((struct RemoveNoiseParam *)param)->a_pstInode;
+    struct file  *a_pstFile  = ((struct RemoveNoiseParam *)param)->a_pstFile;
+    unsigned long currentPos = g_pstAF_CurDrv->pAF_GetCurrentPos();
+
+    LOG_INF("remove noise start");
+
+    // multiple times
+    while (currentPos > 500) {
+        currentPos -= 50;
+        g_pstAF_CurDrv->pAF_Ioctl(a_pstFile, AFIOC_T_MOVETO, currentPos);
+        mdelay(4);
+    }
+
+    if (g_pstAF_CurDrv) {
+        g_pstAF_CurDrv->pAF_Release(a_pstInode, a_pstFile);
+        g_pstAF_CurDrv = NULL;
+    } else {
+        spin_lock(&g_AF_SpinLock);
+        g_s4AF_Opened = 0;
+        spin_unlock(&g_AF_SpinLock);
+    }
+
+    camaf_power_off();
+
+    LOG_INF("remove noise end,g_s4AF_Opened;%d",g_s4AF_Opened);
+    return 0;
+}
+
 static int AF_Release(struct inode *a_pstInode, struct file *a_pstFile)
 {
+	struct task_struct *pTask = NULL;
+    struct RemoveNoiseParam param = {
+        .a_pstInode = a_pstInode,
+        .a_pstFile  = a_pstFile
+    };
+
 	LOG_INF("Start\n");
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	spin_lock(&g_AF_SpinLock);
-	if (g_pstAF_CurDrv && g_s4AF_Opened >= 1 && Open_holder == 0) {
-		spin_unlock(&g_AF_SpinLock);
-#else
-	if (g_pstAF_CurDrv) {
-#endif
-		g_pstAF_CurDrv->pAF_Release(a_pstInode, a_pstFile);
-		g_pstAF_CurDrv = NULL;
-	}
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-        else if(g_s4AF_Opened >= 1 && g_pstAF_CurDrv ){
-			if(Open_holder == VIB_HOLD && Close_holder == CAM_HOLD){
-				spin_unlock(&g_AF_SpinLock);
-				g_pstAF_CurDrv->pAF_ResetPos(af_len);
-			}else{
-				spin_unlock(&g_AF_SpinLock);
-			}
+	if (g_pstAF_CurDrv && g_pstAF_CurDrv->pAF_GetCurrentPos != NULL) {
+		pTask = kthread_run(taskRemoveNoise, &param, "taskRemoveNoise");
+    } else {
+		if (g_pstAF_CurDrv) {
+			g_pstAF_CurDrv->pAF_Release(a_pstInode, a_pstFile);
+			g_pstAF_CurDrv = NULL;
+		} else {
 			spin_lock(&g_AF_SpinLock);
-			if(Close_holder == VIB_HOLD){
-				spin_unlock(&g_AF_SpinLock);
-				LOG_INF("pm_relax vib_wakelock\n");
-				__pm_relax(&vib_wakelock);
-			}else{
-				spin_unlock(&g_AF_SpinLock);
-			}
-			return 0;
-        }
-#endif
-	else {
-#ifndef CONFIG_AF_NOISE_ELIMINATION
-		spin_lock(&g_AF_SpinLock);
-#endif
-		g_s4AF_Opened = 0;
-		spin_unlock(&g_AF_SpinLock);
-	}
+			g_s4AF_Opened = 0;
+			spin_unlock(&g_AF_SpinLock);
+		}
 
 	camaf_power_off();
-
+	}
 	/* OIS/EIS Timer & Workqueue */
 	/* Cancel Timer */
 	hrtimer_cancel(&ois_timer);
@@ -572,16 +708,6 @@ static int AF_Release(struct inode *a_pstInode, struct file *a_pstFile)
 	}
 	/* ------------------------- */
 
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	spin_lock(&g_AF_SpinLock);
-	if(Close_holder == VIB_HOLD){
-		spin_unlock(&g_AF_SpinLock);
-		LOG_INF("pm_relax vib_wakelock\n");
-		__pm_relax(&vib_wakelock);
-	}else{
-		spin_unlock(&g_AF_SpinLock);
-	}
-#endif
 	LOG_INF("End\n");
 
 	return 0;
@@ -644,7 +770,12 @@ static inline int Register_AF_CharDrv(void)
 
 	if (lens_device == NULL)
 		return -EIO;
-
+#ifdef AF_RESONANCE_SCHEME
+	if (device_create_file(lens_device, &dev_attr_af_noise)) {
+		LOG_INF("Failed to create device file(strobe)\n");
+		device_remove_file(lens_device, &dev_attr_af_noise);
+	}
+#endif
 	LOG_INF("End\n");
 	return 0;
 }
@@ -652,7 +783,10 @@ static inline int Register_AF_CharDrv(void)
 static inline void Unregister_AF_CharDrv(void)
 {
 	LOG_INF("Start\n");
-
+#ifdef AF_RESONANCE_SCHEME
+	LOG_INF("device_remove_file\n");
+	device_remove_file(lens_device, &dev_attr_af_noise);
+#endif
 	/* Release char driver */
 	cdev_del(g_pAF_CharDrv);
 
@@ -661,7 +795,11 @@ static inline void Unregister_AF_CharDrv(void)
 	device_destroy(actuator_class, g_AF_devno);
 
 	class_destroy(actuator_class);
-
+#ifdef AF_RESONANCE_SCHEME
+	cancel_work_sync(&vibrate_work);
+	cancel_work_sync(&vibrate_stop_work);
+	hrtimer_cancel(&my_timer);
+#endif
 	LOG_INF("End\n");
 }
 
@@ -716,8 +854,11 @@ static int AF_i2c_probe(struct i2c_client *client,
 
 		return i4RetValue;
 	}
-#ifdef CONFIG_MOT_CANCUNF_CAMERA_PROJECT
-	aw86006_ois_init(g_pstAF_I2Cclient);
+#ifdef AF_RESONANCE_SCHEME
+	INIT_WORK(&vibrate_work, af_noise_vibrate_work);
+	INIT_WORK(&vibrate_stop_work, af_stop_vibrate_work);
+	my_timer_init();
+	spin_lock_init(&vibrate_lock);
 #endif
 	spin_lock_init(&g_AF_SpinLock);
 
@@ -787,11 +928,6 @@ static int __init MAINAF_i2C_init(void)
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	memset(&vib_wakelock,0,sizeof(vib_wakelock));
-	vib_wakelock.name = "vibrator_noise_elimination";
-	wakeup_source_add(&vib_wakelock);
-#endif
 	return 0;
 }
 
@@ -799,10 +935,6 @@ static void __exit MAINAF_i2C_exit(void)
 {
 	platform_driver_unregister(&g_stAF_Driver);
 	platform_device_unregister(&g_stAF_device);
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	__pm_relax(&vib_wakelock);
-	wakeup_source_remove(&vib_wakelock);
-#endif
 }
 module_init(MAINAF_i2C_init);
 module_exit(MAINAF_i2C_exit);

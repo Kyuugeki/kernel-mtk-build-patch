@@ -91,7 +91,6 @@ enum {
 	USB_TYPE_MTP,
 	/* USB_TYPE_PTP, */
 	USB_TYPE_RNDIS,
-	USB_TYPE_ACCESSORY,
 };
 
 #if IS_ENABLED(CONFIG_USB_MTK_HDRC)
@@ -721,9 +720,6 @@ static int musb_get_ep_type(struct usb_descriptor_header **f_desc)
 		} else if (int_class == 0xe0 && int_subclass == 0x1
 			&& int_protocol == 0x3) {
 			return USB_TYPE_RNDIS;
-		} else if (int_class == 0xff && int_subclass == 0xff
-			&& int_protocol == 0x00) {
-			return USB_TYPE_ACCESSORY;
 		}
 	}
 
@@ -799,16 +795,14 @@ static void boost_ep_disable(void *unused, struct musb_ep *musb_ep)
 
 static void musb_g_giveback_boost(void *unused, struct musb_request *musb_req)
 {
-	//struct usb_request *req = &musb_req->request;
+	struct usb_request *req = &musb_req->request;
 	struct musb_ep *musb_ep = musb_req->ep;
 	int type = boost_get_ep_type(musb_ep->current_epnum, musb_ep->is_in);
 
 	switch (type) {
 	case USB_TYPE_MTP:
-	case USB_TYPE_ACCESSORY:
-		//if (req->actual >= 8192)
-		usb_boost();
-		pr_info("USB_TYPE_MTP/USB_TYPE_ACCESSORY boost!");
+		if (req->actual >= 8192)
+			usb_boost();
 		break;
 	case USB_TYPE_RNDIS:
 		if (musb_ep->is_in && musb_ep->type == USB_ENDPOINT_XFER_BULK)

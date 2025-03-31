@@ -304,19 +304,6 @@ static const char *const typec_attach_name[] = {
 };
 #endif /* TYPEC_INFO_ENABLE || TYPEC_DBG_ENABLE */
 
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-static bool g_tcpc_pd_adapter_flag = false;
-void mmi_tcpc_set_pd_flag(bool flag){
-	pr_notice("%s  pd flag:%d\n", __func__, flag);
-	g_tcpc_pd_adapter_flag = flag;
-}
-
-bool mmi_tcpc_get_pd_flag(void){
-	pr_notice("%s  pd flag:%d\n", __func__, g_tcpc_pd_adapter_flag);
-	return g_tcpc_pd_adapter_flag;
-}
-#endif
-
 static int typec_alert_attach_state_change(struct tcpc_device *tcpc)
 {
 	int ret = 0;
@@ -329,23 +316,13 @@ static int typec_alert_attach_state_change(struct tcpc_device *tcpc)
 #endif	/* CONFIG_TYPEC_CHECK_LEGACY_CABLE */
 
 	if (tcpc->typec_attach_old == tcpc->typec_attach_new) {
-		TYPEC_INFO("Attached-> %s(repeat)\n",
+		TYPEC_DBG("Attached-> %s(repeat)\n",
 			typec_attach_name[tcpc->typec_attach_new]);
 		return 0;
 	}
 
 	TYPEC_INFO("Attached-> %s\n",
 		   typec_attach_name[tcpc->typec_attach_new]);
-
-#ifdef CONFIG_SUPPORT_MMI_ADAPTER
-	if (tcpc->typec_remote_rp_level == TYPEC_CC_VOLT_SNK_3_0 &&
-	    tcpc->typec_local_rp_level == TYPEC_CC_RP_DFT &&
-	    tcpc->typec_attach_new != TYPEC_UNATTACHED ) {
-		mmi_tcpc_set_pd_flag(true);
-	} else if (tcpc->typec_attach_new == TYPEC_UNATTACHED) {
-		mmi_tcpc_set_pd_flag(false);
-	}
-#endif
 
 	/*Report function */
 	ret = tcpci_report_usb_port_changed(tcpc);
@@ -872,11 +849,22 @@ static inline bool typec_role_is_try_src(
 
 static inline void typec_try_src_entry(struct tcpc_device *tcpc)
 {
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	uint32_t chip_id;
+	int rv = 0;
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
+
 	TYPEC_NEW_STATE(typec_try_src);
 	tcpc->typec_drp_try_timeout = false;
 
 	tcpci_set_cc(tcpc, TYPEC_CC_RP);
 	tcpc_enable_timer(tcpc, TYPEC_TRY_TIMER_DRP_TRY);
+
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	rv = tcpci_get_chip_id(tcpc, &chip_id);
+	if (!rv &&  SC2150A_DID == chip_id)
+		tcpc_typec_handle_cc_change(tcpc);
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 }
 
 static inline void typec_trywait_snk_entry(struct tcpc_device *tcpc)
@@ -931,11 +919,22 @@ static inline bool typec_role_is_try_sink(
 
 static inline void typec_try_snk_entry(struct tcpc_device *tcpc)
 {
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	int rv = 0;
+	uint32_t chip_id;
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
+
 	TYPEC_NEW_STATE(typec_try_snk);
 	tcpc->typec_drp_try_timeout = false;
 
 	tcpci_set_cc(tcpc, TYPEC_CC_RD);
 	tcpc_enable_timer(tcpc, TYPEC_TRY_TIMER_DRP_TRY);
+
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	rv = tcpci_get_chip_id(tcpc, &chip_id);
+	if (!rv && SC2150A_DID == chip_id)
+		tcpc_typec_handle_cc_change(tcpc);
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 }
 
 static inline void typec_trywait_src_entry(struct tcpc_device *tcpc)
@@ -1592,6 +1591,10 @@ static inline bool typec_handle_cc_changed_entry(struct tcpc_device *tcpc)
 static inline void typec_attach_wait_entry(struct tcpc_device *tcpc)
 {
 	bool as_sink;
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	int rv = 0;
+	uint32_t chip_id = 0;
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 #if IS_ENABLED(CONFIG_USB_POWER_DELIVERY)
 	struct pd_port *pd_port = &tcpc->pd_port;
 #endif	/* CONFIG_USB_POWER_DELIVERY */
@@ -1660,9 +1663,17 @@ static inline void typec_attach_wait_entry(struct tcpc_device *tcpc)
 	tcpci_notify_attachwait_state(tcpc, as_sink);
 #endif	/* CONFIG_TYPEC_NOTIFY_ATTACHWAIT */
 
-	if (as_sink)
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	rv = tcpci_get_chip_id(tcpc, &chip_id);
+	if (as_sink) {
 		TYPEC_NEW_STATE(typec_attachwait_snk);
-	else {
+		if (!rv &&  SC2150A_DID == chip_id)
+			tcpci_set_cc(tcpc, TYPEC_CC_RD);
+#else
+	if (as_sink) {
+		TYPEC_NEW_STATE(typec_attachwait_snk);
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
+	} else {
 		/* Advertise Rp level before Attached.SRC Ellisys 3.1.6359 */
 		tcpci_set_cc(tcpc, tcpc->typec_local_rp_level);
 		TYPEC_NEW_STATE(typec_attachwait_src);
@@ -2198,7 +2209,11 @@ static inline int typec_handle_debounce_timeout(struct tcpc_device *tcpc)
 	}
 
 #if CONFIG_TYPEC_CAP_NORP_SRC
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	if (typec_is_cc_no_res() && tcpci_check_vbus_valid_from_ic(tcpc)
+#else
 	if (typec_is_cc_no_res() && tcpci_check_vbus_valid(tcpc)
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 		&& (tcpc->typec_state == typec_unattached_snk))
 		return typec_norp_src_attached_entry(tcpc);
 #endif
@@ -2580,6 +2595,13 @@ int tcpc_typec_handle_ps_change(struct tcpc_device *tcpc, int vbus_level)
 {
 	tcpc->typec_reach_vsafe0v = false;
 
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	// open vsafe0.8v irq
+	if (vbus_level >= TCPC_VBUS_VALID)
+		typec_disable_low_power_mode(tcpc);
+	else
+		typec_enter_low_power_mode(tcpc);
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 #if CONFIG_TYPEC_CHECK_LEGACY_CABLE
 	if (tcpc->typec_legacy_cable) {
 		typec_legacy_handle_ps_change(tcpc, vbus_level);

@@ -2099,27 +2099,3 @@ config FAKE_ASYM32_CPU
 	  the capability to run 32bit user space program.
 	  This feature should not be enabled in MP project. If you don't know,
 	  say N.
-
-config AW_RAMPING_SUPPORT
-	bool "aw dual smart pa ramping"
-	default n
-	help
-	Enable it only for dual smart pa.
-
-config DUMMY_SND_CARD_SUPPORT
-	bool "no smart pa,dummy snd card"
-	default n
-	help
-	Enable it only for not smart pa on board.
-
-config FSA4480_SENS_TO_GND
-	bool "fsa4480 sens connect to gnd"
-	default n
-	help
-	Enable it only for fsa4480 sens connect to gnd.
-
-config AW_MTK_RCV_SUPPORT
-	bool "two smart pa but use mtk receiver path"
-	default n
-	help
-	Enable it only for two smart pa but use mtk receiver path.

@@ -23,7 +23,7 @@ struct charger_cooler_info {
 
 static struct charger_cooler_info charger_cl_data;
 /* < -1 is unlimit, unit is uA. */
-static  int master_charger_state_to_current_limit[CHARGER_STATE_NUM] = {
+static const int master_charger_state_to_current_limit[CHARGER_STATE_NUM] = {
 	-1, 2600000, 2200000, 1800000, 1400000, 1000000, 700000, 500000, 0
 };
 static const int slave_charger_state_to_current_limit[CHARGER_STATE_NUM] = {
@@ -34,51 +34,15 @@ static const int slave_charger_state_to_current_limit[CHARGER_STATE_NUM] = {
  * cooler callback functions
  *==================================================
  */
-// extern bool is_kernel_power_off_charging(void);
-#ifdef CONFIG_MOTO_THERMAL_POWER_OFF_ALGO
-static int g_boot_mode = 0;
-bool is_kernel_power_off_charging(void)
-{
-	/* KERNEL_POWER_OFF_CHARGING_BOOT */
-	if (g_boot_mode == 8)
-		return true;
-
-	return false;
-}
-
-bool is_thermal_core_thread(void)
-{
-	if(strstr(current->comm,"thermal_core"))
-		return true;
-	else
-		return false;
-}
-#endif
-
 static int charger_throttle(struct charger_cooling_device *charger_cdev, unsigned long state)
 {
 	struct device *dev = charger_cdev->dev;
-#ifdef CONFIG_MOTO_THERMAL_POWER_OFF_ALGO
 
-	if(is_kernel_power_off_charging() && is_thermal_core_thread() ){
-		dev_info(dev, "skip thermal_core charging thermal at COM lvl:%d\n",state);
-		return 0;
-	}
-
-	if(!is_kernel_power_off_charging() && !is_thermal_core_thread() ){
-		dev_info(dev, "skip kernel charging thermal at power on lvl:%d\n",state);
-		return 0;
-	}
-#endif
 	charger_cdev->target_state = state;
 	charger_cdev->pdata->state_to_charger_limit(charger_cdev);
 	charger_cl_data.cur_state = state;
 	charger_cl_data.cur_current = master_charger_state_to_current_limit[state];
-#ifdef CONFIG_MOTO_THERMAL_POWER_OFF_ALGO
-	dev_err(dev, "%s: set lv = %ld done, thread:%s\n", charger_cdev->name, state, current->comm);
-#else
-	dev_err(dev, "%s: set lv = %ld done\n", charger_cdev->name, state);
-#endif
+	dev_info(dev, "%s: set lv = %ld done\n", charger_cdev->name, state);
 	return 0;
 }
 static int charger_cooling_get_max_state(struct thermal_cooling_device *cdev, unsigned long *state)
@@ -86,6 +50,7 @@ static int charger_cooling_get_max_state(struct thermal_cooling_device *cdev, un
 	struct charger_cooling_device *charger_cdev = cdev->devdata;
 
 	*state = charger_cdev->max_state;
+
 	return 0;
 }
 
@@ -127,34 +92,12 @@ static int cooling_state_to_charger_limit_v1(struct charger_cooling_device *chg)
 	union power_supply_propval prop_vbus;
 	union power_supply_propval prop_s_bat_chr;
 	int ret = -1;
-	#ifdef CONFIG_MOTO_CHG_WT6670F_SUPPORT
-	#ifndef CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-	union power_supply_propval prop_bq_chr;
-	prop_bq_chr.intval = 0;
-	#endif // CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-	#endif // CONFIG_MOTO_CHG_WT6670F_SUPPORT
 
 	if (chg->chg_psy == NULL || IS_ERR(chg->chg_psy)) {
 		pr_info("Couldn't get chg_psy\n");
 		return ret;
 	}
 	prop_bat_chr.intval = master_charger_state_to_current_limit[chg->target_state];
-
-	#ifdef CONFIG_MOTO_CHG_WT6670F_SUPPORT
-	#ifndef CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-	ret = power_supply_get_property(chg->bq_chg_psy,
-		POWER_SUPPLY_PROP_STATUS, &prop_bq_chr);
-	if (ret != 0) {
-		pr_notice("set charging enable fail\n");
-	}
-
-	ret = power_supply_set_property(chg->q_chg_psy,
-		POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX, &prop_bat_chr);
-	if (ret != 0) {
-		pr_notice("qc3p temp level set bat curr fail\n");
-	}
-	#endif // CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-	#endif // CONFIG_MOTO_CHG_WT6670F_SUPPORT
 
 	ret = power_supply_set_property(chg->chg_psy,
 		POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
@@ -167,7 +110,6 @@ static int cooling_state_to_charger_limit_v1(struct charger_cooling_device *chg)
 		prop_input.intval = 0;
 	else
 		prop_input.intval = -1;
-
 	ret = power_supply_set_property(chg->chg_psy,
 		POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &prop_input);
 	if (ret != 0) {
@@ -191,8 +133,8 @@ static int cooling_state_to_charger_limit_v1(struct charger_cooling_device *chg)
 		return ret;
 	}
 
-       pr_notice("chr limit state %lu, chr %d, input %d, vbus %d\n",
-               chg->target_state, prop_bat_chr.intval, prop_input.intval, prop_vbus.intval);
+	pr_notice("chr limit state %lu, chr %d, input %d, vbus %d\n",
+		chg->target_state, prop_bat_chr.intval, prop_input.intval, prop_vbus.intval);
 
 	power_supply_changed(chg->chg_psy);
 
@@ -308,16 +250,8 @@ static int charger_cooling_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	struct thermal_cooling_device *cdev;
 	struct charger_cooling_device *charger_cdev;
-	int i, ret;
-#ifdef CONFIG_MOTO_THERMAL_POWER_OFF_ALGO
-	struct device_node *boot_np = NULL;
-	const struct {
-		u32 size;
-		u32 tag;
-		u32 boot_mode;
-		u32 boot_type;
-		} *tag;
-#endif
+	int ret;
+
 	charger_cdev = devm_kzalloc(dev, sizeof(*charger_cdev), GFP_KERNEL);
 	if (!charger_cdev)
 		return -ENOMEM;
@@ -336,53 +270,12 @@ static int charger_cooling_probe(struct platform_device *pdev)
 		pr_info("Couldn't get chg_psy\n");
 		return -EINVAL;
 	}
-        #ifdef CONFIG_MOTO_THERMAL_POWER_OFF_ALGO
-	boot_np = of_parse_phandle(np, "bootmode",0);
-	if(!boot_np)
-		pr_info("%d:failed to get bootmode phandle\n", __func__);
-	else {
-		tag = of_get_property(boot_np, "atag,boot", NULL);
-		if (!tag) {
-			pr_err("%s: failed to get atag,boot\n", __func__);
-			g_boot_mode = 0;
-			pr_err("%s: set bootmode=8, boottype=2\n", __func__);
-		} else {
-			g_boot_mode = tag->boot_mode;
-			pr_err("%s: sz:0x%x tag:0x%x bootmode:0x%x type:0x%x\n",
-		__func__, tag->size, tag->tag, tag->boot_mode, tag->boot_type);
-		}
-	}
-        #endif
-	#ifdef CONFIG_MOTO_CHG_WT6670F_SUPPORT
-	#ifndef CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-	charger_cdev->q_chg_psy = power_supply_get_by_name("mmi_chrg_manager");
-	if (charger_cdev->q_chg_psy == NULL || IS_ERR(charger_cdev->q_chg_psy)) {
-		pr_info("Couldn't get mmi chrg manager psy\n");
-		return -EPROBE_DEFER;
-	}
-	charger_cdev->bq_chg_psy = power_supply_get_by_name("bq2597x-standalone");
-	if (charger_cdev->bq_chg_psy == NULL || IS_ERR(charger_cdev->bq_chg_psy)) {
-		pr_info("Couldn't get bq2597x psy\n");
-		return -EPROBE_DEFER;
-	}
-	#endif // CONFIG_MOTO_DISCRETE_CHARGE_PUMP_SUPPORT
-	#endif // CONFIG_MOTO_CHG_WT6670F_SUPPORT
-
 	if (charger_cdev->type == DUAL_CHARGER) {
 		charger_cdev->s_chg_psy = power_supply_get_by_name("mtk-slave-charger");
 		if (charger_cdev->s_chg_psy == NULL || IS_ERR(charger_cdev->s_chg_psy)) {
 			pr_info("Couldn't get s_chg_psy\n");
 			return -EINVAL;
 		}
-	}
-
-	of_property_read_u32_array(np,
-			"mmi,thermal-mitigation",
-			master_charger_state_to_current_limit,
-			CHARGER_STATE_NUM);
-	for (i = 0; i < CHARGER_STATE_NUM; i++) {
-			pr_info("mmi charge thermal table: table %d, current %d mA\n",
-			i, master_charger_state_to_current_limit[i]);
 	}
 
 	ret = sysfs_create_group(kernel_kobj, &charger_cooler_attr_group);
@@ -402,6 +295,7 @@ static int charger_cooling_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, charger_cdev);
 	dev_info(dev, "register %s done, id=%d\n", charger_cdev->name);
+
 	return 0;
 }
 

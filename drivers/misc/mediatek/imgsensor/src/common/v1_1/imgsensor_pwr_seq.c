@@ -11,201 +11,57 @@
 
 /* Legacy design */
 struct IMGSENSOR_HW_POWER_SEQ sensor_power_sequence[] = {
-
-#if defined(MOT_CANCUNF_OV50D_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_CANCUNF_OV50D_MIPI_RAW,
+#if defined(HI1339_MIPI_RAW)
 		{
-			{SensorMCLK, Vol_High,1},
-			{RST, Vol_Low, 1},
-			{DOVDD, Vol_High, 0},
-			{AVDD, Vol_High, 0},
-			{DVDD, Vol_High, 1},
-			{DVDD1, Vol_High, 1},
-			{AFVDD, Vol_High, 1},
-			{RST, Vol_High, 5},
+			SENSOR_DRVNAME_HI1339_MIPI_RAW,
+			{
+				{RST, Vol_Low, 1},
+				{DOVDD, Vol_1800, 1},
+				{AVDD, Vol_2800, 0},
+				{DVDD, Vol_1200, 0},
+				{AFVDD, Vol_2800, 0},
+				{SensorMCLK, Vol_High, 1},
+				{RST, Vol_High, 2}
+			},
 		},
-	},
 #endif
-#if defined(MOT_CANCUNF_HI1634Q_MIPI_RAW)
+#if defined(OV13B10MAIN_MIPI_RAW)
 	{
-		SENSOR_DRVNAME_MOT_CANCUNF_HI1634Q_MIPI_RAW,
+		SENSOR_DRVNAME_OV13B10MAIN_MIPI_RAW,
 		{
 			{RST, Vol_Low, 1},
-			{DOVDD, Vol_High, 0},
-			{AVDD, Vol_High, 0},
-			{DVDD, Vol_High, 1},//1.1v
-			{SensorMCLK, Vol_High, 1},
-			{RST, Vol_High, 5},
-		},
-	},
-#endif
-#if defined(MOT_CANCUNF_S5K4H7_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_CANCUNF_S5K4H7_MIPI_RAW,
-		{
-			{RST, Vol_Low, 1},
-			{SensorMCLK, Vol_High, 1},
-			{DVDD, Vol_High, 1},
-			{AVDD, Vol_2800, 1},
+			{AVDD, Vol_2900, 0},
+			{DVDD, Vol_1200, 0},
 			{DOVDD, Vol_1800, 1},
-			{AFVDD, Vol_2800, 1},
-			{RST, Vol_High, 4}
-		},
-	},
-#endif
-#if defined(MOT_CANCUNF_SC202_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_CANCUNF_SC202_MIPI_RAW,
-		{
-			{RST, Vol_Low, 0},
-			{DOVDD, Vol_1800, 1},
-			{AVDD, Vol_2800, 1},
-			{RST, Vol_High, 2},
-			{SensorMCLK, Vol_High, 5},
-		},
-	},
-#endif
-#if defined(MOT_DEVONF_OV50A_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_DEVONF_OV50A_MIPI_RAW,
-		{
-			{SensorMCLK, Vol_High, 1},
-			{RST, Vol_Low, 1},
-			{DOVDD, Vol_High, 0},
-			{AVDD, Vol_High, 0},
-			{DVDD, Vol_High, 1},
-			{AFVDD, Vol_High, 1},
+			{AFVDD, Vol_2900, 0},
 			{RST, Vol_High, 5},
-		},
-	},
-#endif
-#if defined(MOT_DEVONF_HI1634Q_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_DEVONF_HI1634Q_MIPI_RAW,
-		{
 			{SensorMCLK, Vol_High, 1},
-			{RST, Vol_Low, 1},
-			{DOVDD, Vol_High, 0},
-			{AVDD, Vol_High, 0},
-			{DVDD, Vol_High, 1},//1.1v
-			{RST, Vol_High, 5},
 		},
 	},
 #endif
-#if defined(MOT_DEVONF_S5K4H7_MIPI_RAW)
+#if defined(S5K4H7FRONT_MIPI_RAW)
 	{
-		SENSOR_DRVNAME_MOT_DEVONF_S5K4H7_MIPI_RAW,
+		SENSOR_DRVNAME_S5K4H7FRONT_MIPI_RAW,
 		{
 			{RST, Vol_Low, 1},
-			{SensorMCLK,Vol_Low,1},
-			{AVDD, Vol_High, 1},
-			{DVDD, Vol_High, 1},
-			{DOVDD, Vol_High, 1},
-			{AFVDD, Vol_High, 1},
-			{RST, Vol_High, 1},
+			{DOVDD, Vol_1800, 0},
+			{AVDD, Vol_2800, 0},
+			{DVDD, Vol_1200, 1},
+			{RST, Vol_High, 4},
 			{SensorMCLK, Vol_High, 4},
 		},
 	},
 #endif
-#if defined(MOT_DEVONN_S5KJN1_MIPI_RAW)
+#if defined(SC800CS_MIPI_RAW)
 	{
-		SENSOR_DRVNAME_MOT_DEVONN_S5KJN1_MIPI_RAW,
-			{
-				{RST, Vol_Low, 1},
-				{DOVDD, Vol_1800, 1},
-#ifdef ENABLE_MOT_MT6855_DEVONN
-				{DVDD, Vol_1100, 1},
-#else
-				{DVDD, Vol_1100, 0},
-#endif
-				//{PDN, Vol_High, 0},
-				{AVDD, Vol_High, 1},
-				{RST, Vol_High, 1},
-				{SensorMCLK, Vol_High, 9},
-			},
-	},
-#endif
-#if defined(MOT_DEVONN_HI1634Q_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_DEVONN_HI1634Q_MIPI_RAW,
+		SENSOR_DRVNAME_SC800CS_MIPI_RAW,
 		{
-				{SensorMCLK, Vol_High, 1},
-				{RST, Vol_Low, 1},
-				{DOVDD, Vol_1800, 0},
-				{AVDD, Vol_2800, 0},
-				//{PDN, Vol_High, 0},
-				{DVDD, Vol_1100, 1},
-				{RST, Vol_High, 5}
-		},
-	},
-#endif
-
-#if defined(MOT_DEVONN_GC02M1_MIPI_RAW)
-       {
-               SENSOR_DRVNAME_MOT_DEVONN_GC02M1_MIPI_RAW,
-			{
-				{RST, Vol_Low, 1},
-				{SensorMCLK, Vol_High, 2},
-				{DOVDD, Vol_1800, 1},
-				{AVDD, Vol_2800, 1},
-				{RST, Vol_High, 2},
-			},
-       },
-#endif
-
-#if defined(MOT_DEVONN_OV02B10_MIPI_RAW)
-	{
-			SENSOR_DRVNAME_MOT_DEVONN_OV02B10_MIPI_RAW,
-		{
-			{RST, Vol_Low, 1},
-			{DOVDD, Vol_1800, 1},
-			{AVDD, Vol_2800, 9},
-			{RST, Vol_High, 2},
-			{SensorMCLK, Vol_High, 0},
-		},
-	},
-#endif
-
-#if defined(MOT_VICKY_S5KHM6_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_VICKY_S5KHM6_MIPI_RAW,
-		{
-			{SensorMCLK, Vol_High, 1},
-			{RST, Vol_Low, 1},
-			{AFVDD, Vol_2800, 0},
-			{DOVDD, Vol_1800, 0},
-			{AVDD, Vol_2200, 0},
-			{DVDD, Vol_1000, 1},
-			{RST, Vol_High, 11},
-		},
-	},
-#endif
-#if defined(MOT_VICKY_S5KGM1_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_VICKY_S5KGM1_MIPI_RAW,
-		{
-			{SensorMCLK, Vol_High, 1},
-			{RST, Vol_Low, 1},
-			{AFVDD, Vol_2800, 0},
-			{DOVDD, Vol_1800, 0},
-			{AVDD, Vol_2800, 0},
-			{DVDD, Vol_1100, 1},
+			{RST, Vol_Low, 0},
+			{DOVDD, Vol_1804, 2},
+			{DVDD, Vol_1200, 1},
+			{AVDD, Vol_2900, 0},
 			{RST, Vol_High, 1},
-		},
-	},
-#endif
-#if defined(MOT_VICKY_HI1634Q_MIPI_RAW)
-	{
-		SENSOR_DRVNAME_MOT_VICKY_HI1634Q_MIPI_RAW,
-
-		{
-			{SensorMCLK, Vol_High, 1},
-			{RST, Vol_Low, 1},
-			{DOVDD, Vol_1800, 0},
-			{AVDD, Vol_2800, 0},
-			{DVDD, Vol_1100, 1},//1.1v
-			{RST, Vol_High, 5}
+			{SensorMCLK, Vol_High, 4}
 		},
 	},
 #endif
@@ -239,18 +95,6 @@ struct IMGSENSOR_HW_POWER_SEQ sensor_power_sequence[] = {
 			{PDN, Vol_High, 0},
 			{SensorMCLK, Vol_High, 1},
 			{RST, Vol_High, 2}
-		},
-	},
-#endif
-#if defined(MOT_VICKY_OV02B10_SENSOR_ID)
-		{
-			SENSOR_DRVNAME_MOT_VICKY_OV02B10_MIPI_RAW,
-			{
-			{RST, Vol_Low, 1},
-			{DOVDD, Vol_1800, 0},
-			{SensorMCLK, Vol_High, 0},
-			{AVDD, Vol_2800, 9},
-			{RST, Vol_High, 9}
 		},
 	},
 #endif
@@ -562,20 +406,6 @@ struct IMGSENSOR_HW_POWER_SEQ sensor_power_sequence[] = {
 			{RST, Vol_High, 0},
 		},
 	},
-#endif
-#if defined(MOT_VICKY_S5K4H7_MIPI_RAW)
-		{
-			SENSOR_DRVNAME_MOT_VICKY_S5K4H7_MIPI_RAW,
-			{
-				{RST, Vol_Low, 1},
-				{SensorMCLK,Vol_Low,1},
-				{AVDD, Vol_2800, 1},
-				{DVDD, Vol_1200, 1},
-				{DOVDD, Vol_1800, 1},
-				{RST, Vol_High, 1},
-				{SensorMCLK, Vol_High, 4},
-			},
-		},
 #endif
 #if defined(S5K4E6_MIPI_RAW)
 	{

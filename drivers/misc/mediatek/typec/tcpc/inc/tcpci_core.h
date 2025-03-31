@@ -42,7 +42,7 @@
 #define DPM_DBG_ENABLE		0
 #define PD_ERR_ENABLE		1
 #define PE_DBG_ENABLE		0
-#define TYPEC_DBG_ENABLE	1
+#define TYPEC_DBG_ENABLE	0
 
 
 #define DP_INFO_ENABLE		1
@@ -50,8 +50,6 @@
 
 #define UVDM_INFO_ENABLE	1
 #define TCPM_DBG_ENABLE		1
-
-#define MMI_DBG_ENABLE	1
 
 #if CONFIG_USB_PD_ALT_MODE_RTDC
 #define DC_INFO_ENABLE		1
@@ -220,6 +218,9 @@ struct tcpc_ops {
 	int (*init)(struct tcpc_device *tcpc, bool sw_reset);
 	int (*init_alert_mask)(struct tcpc_device *tcpc);
 	int (*alert_status_clear)(struct tcpc_device *tcpc, uint32_t mask);
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+	int (*get_chip_id)(struct tcpc_device *tcpc, uint32_t *chip_id);
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 	int (*fault_status_clear)(struct tcpc_device *tcpc, uint8_t status);
 	int (*set_alert_mask)(struct tcpc_device *tcpc, uint32_t mask);
 	int (*get_alert_mask)(struct tcpc_device *tcpc, uint32_t *mask);
@@ -719,12 +720,5 @@ static inline bool pd_check_rev30(struct pd_port *pd_port)
 #endif
 
 #endif	/* CONFIG_USB_PD_ALT_MODE_RTDC */
-
-#if MMI_DBG_ENABLE
-#define MMI_INFO(format, args...)	\
-	RT_DBG_INFO(CONFIG_TCPC_DBG_PRESTR "MMI> " format, ##args)
-#else
-#define MMI_INFO(format, args...)
-#endif
 
 #endif /* #ifndef __LINUX_RT_TCPCI_CORE_H */

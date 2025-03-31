@@ -959,8 +959,6 @@ static int mtk_spi_probe(struct platform_device *pdev)
 
 	if (!of_property_read_bool(pdev->dev.of_node, "tee-only"))
 		master->set_cs = mtk_spi_set_cs;
-	else
-		dev_info(&pdev->dev,"get tee-only property\n");
 
 	if (mdata->dev_comp->need_pad_sel) {
 		mdata->pad_num = of_property_count_u32_elems(
@@ -991,7 +989,6 @@ static int mtk_spi_probe(struct platform_device *pdev)
 				goto err_put_master;
 			}
 		}
-		master->num_chipselect = mdata->pad_num;
 	}
 
 	platform_set_drvdata(pdev, master);
@@ -1058,14 +1055,12 @@ static int mtk_spi_probe(struct platform_device *pdev)
 			goto err_put_master;
 		}
 
-/*
 		if (!master->cs_gpios && master->num_chipselect > 1) {
 			dev_err(&pdev->dev,
 				"cs_gpios not specified and num_chipselect > 1\n");
 			ret = -EINVAL;
 			goto err_put_master;
 		}
-*/
 
 		if (master->cs_gpios) {
 			for (i = 0; i < master->num_chipselect; i++) {

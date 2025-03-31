@@ -15,16 +15,8 @@
 #include <linux/mutex.h>
 #include <linux/delay.h>
 #include <tcpm.h>
-#include "mtk_charger.h"
 
 #define MTK_CTD_DRV_VERSION	"1.0.0_MTK"
-
-struct tag_bootmode {
-	u32 size;
-	u32 tag;
-	u32 bootmode;
-	u32 boottype;
-};
 
 struct mtk_ctd_info {
 	struct device *dev;
@@ -45,9 +37,6 @@ struct mtk_ctd_info {
 	struct notifier_block pm_nb;
 	bool is_suspend;
 	bool pd_rdy;
-	struct work_struct	mmi_hardreset_work;
-	bool is_mmi_pd_hardreset;
-	bool is_mmi_pd_hardreset_plugout;
 };
 
 enum {
@@ -76,42 +65,15 @@ static int mtk_ext_get_charger_type(struct mtk_ctd_info *mci, int attach)
 	if (mci->bc12_sel == MTK_CTD_BY_MAINPMIC)
 		bc12_psy = power_supply_get_by_name("mtk_charger_type");
 	else if (mci->bc12_sel == MTK_CTD_BY_EXTCHG)
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-		bc12_psy = power_supply_get_by_name("sgm4154x-charger");
-#else
 		bc12_psy = power_supply_get_by_name("ext_charger_type");
-#endif
 	if (IS_ERR_OR_NULL(bc12_psy)) {
 		pr_notice("%s Couldn't get bc12_psy\n", __func__);
 		return -ENODEV;
 	}
 
 	prop.intval = attach;
-	pr_err("%s: attach= %d \n", __func__, prop.intval);
 	return power_supply_set_property(bc12_psy,
 					 POWER_SUPPLY_PROP_ONLINE, &prop);
-}
-static int mmi_mux_typec_chg_chan(enum mmi_mux_channel channel, bool on)
-{
-	struct mtk_charger *info = NULL;
-	struct power_supply *chg_psy = NULL;
-
-	chg_psy = power_supply_get_by_name("mtk-master-charger");
-	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		pr_err("%s Couldn't get chg_psy\n");
-		return 0;
-	} else {
-		info = (struct mtk_charger *)power_supply_get_drvdata(chg_psy);
-	}
-
-	pr_info("%s open typec chg chan = %d on = %d\n", __func__, channel, on);
-
-	if (info->algo.do_mux)
-		info->algo.do_mux(info, channel, on);
-	else
-		pr_err("%s get info->algo.do_mux fail", __func__);
-
-	return 0;
 }
 
 static int typec_attach_thread(void *data)
@@ -228,9 +190,7 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 	struct tcp_notify *noti = data;
 	struct mtk_ctd_info *mci = (struct mtk_ctd_info *)container_of(nb,
 						    struct mtk_ctd_info, pd_nb);
-#ifdef MTK_BASE
 	int counter = 0;	/* for coverity */
-#endif
 
 	switch (event) {
 	case TCP_NOTIFY_SINK_VBUS:
@@ -238,11 +198,6 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 		break;
 	case TCP_NOTIFY_PD_STATE:
 		handle_pd_rdy_attach(mci, noti);
-		if (noti->pd_state.connected == PD_CONNECT_HARD_RESET)
-			mci->is_mmi_pd_hardreset = true;
-		else
-			mci->is_mmi_pd_hardreset = false;
-		pr_info("%s: is_mmi_pd_hardreset = %d\n", __func__, mci->is_mmi_pd_hardreset);
 		break;
 	case TCP_NOTIFY_TYPEC_STATE:
 		if (noti->typec_state.old_state == TYPEC_UNATTACHED &&
@@ -251,8 +206,6 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 		    noti->typec_state.new_state == TYPEC_ATTACHED_NORP_SRC)) {
 			pr_info("%s USB Plug in, pol = %d\n", __func__,
 					noti->typec_state.polarity);
-			mci->is_mmi_pd_hardreset_plugout = false;
-			mmi_mux_typec_chg_chan(MMI_MUX_CHANNEL_TYPEC_CHG, true);
 			handle_typec_pd_attach(mci, ATTACH_TYPE_TYPEC);
 		} else if ((noti->typec_state.old_state == TYPEC_ATTACHED_SNK ||
 		    noti->typec_state.old_state == TYPEC_ATTACHED_CUSTOM_SRC ||
@@ -263,12 +216,6 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 			if (mci->tcpc_kpoc) {
 				pr_info("%s: typec unattached, power off\n",
 					__func__);
-				if (mci->is_mmi_pd_hardreset) {
-					mci->is_mmi_pd_hardreset_plugout = true;
-					schedule_work(&mci->mmi_hardreset_work);
-					break;
-				}
-#ifdef MTK_BASE
 				while (1) {
 					if (counter >= 20000) {
 						kernel_power_off();
@@ -283,18 +230,14 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 					}
 					counter++;
 				}
-#endif
 			}
-			mmi_mux_typec_chg_chan(MMI_MUX_CHANNEL_TYPEC_CHG, false);
 			handle_typec_pd_attach(mci, ATTACH_TYPE_NONE);
 		} else if (noti->typec_state.old_state == TYPEC_ATTACHED_SRC &&
 			noti->typec_state.new_state == TYPEC_ATTACHED_SNK) {
 			pr_info("%s Source_to_Sink, turn to PD Flow\n", __func__);
-			mmi_mux_typec_chg_chan(MMI_MUX_CHANNEL_TYPEC_CHG, true);
 		}  else if (noti->typec_state.old_state == TYPEC_ATTACHED_SNK &&
 			noti->typec_state.new_state == TYPEC_ATTACHED_SRC) {
 			pr_info("%s Sink_to_Source\n", __func__);
-			mmi_mux_typec_chg_chan(MMI_MUX_CHANNEL_TYPEC_CHG, false);
 			handle_typec_pd_attach(mci, ATTACH_TYPE_NONE);
 		}
 		break;
@@ -335,8 +278,6 @@ static int chg_type_det_pm_event(struct notifier_block *notifier,
 
 static void mtk_ctd_parse_dt(struct mtk_ctd_info *mci)
 {
-	struct device_node *boot_node = NULL;
-	struct tag_bootmode *tag = NULL;
 	struct device_node *np = mci->dev->of_node;
 	int ret;
 
@@ -349,47 +290,6 @@ static void mtk_ctd_parse_dt(struct mtk_ctd_info *mci)
 	} else
 		dev_info(mci->dev,
 			 "%s: bc12_sel = %d\n", __func__, mci->bc12_sel);
-
-
-	boot_node = of_parse_phandle(np, "bootmode", 0);
-	if (!boot_node)
-		pr_err("%s: failed to get boot mode phandle\n", __func__);
-	else {
-		tag = (struct tag_bootmode *)of_get_property(boot_node,
-							"atag,boot", NULL);
-		if (!tag)
-			pr_err("%s: failed to get atag,boot\n", __func__);
-		else {
-			pr_err("%s: size:0x%x tag:0x%x bootmode:0x%x boottype:0x%x\n",
-				__func__, tag->size, tag->tag,
-				tag->bootmode, tag->boottype);
-
-			/*charge only mode*/
-			if (tag->bootmode == 8 ||tag->bootmode == 9)
-				mci->tcpc_kpoc = true;
-			else
-				mci->tcpc_kpoc = false;
-		}
-	}
-}
-
-#define MMI_HARDRESET_CNT 50
-static void mmi_pd_hardreset_work(struct work_struct *work)
-
-{
-	int i;
-	struct mtk_ctd_info *mci = container_of(work, struct mtk_ctd_info,
-						mmi_hardreset_work);
-
-	for (i = 0; i < MMI_HARDRESET_CNT; i++) {
-		msleep(20);
-		if (!mci->is_mmi_pd_hardreset_plugout)
-			break;
-	}
-
-	pr_info("mmi_pd_hardreset_work i = %d\n", i);
-	if (i >= MMI_HARDRESET_CNT)
-		kernel_power_off();
 }
 
 static int mtk_ctd_probe(struct platform_device *pdev)
@@ -397,17 +297,12 @@ static int mtk_ctd_probe(struct platform_device *pdev)
 	struct mtk_ctd_info *mci;
 	int ret;
 
-	pr_err("%s: --start--\n", __func__);
 	mci = devm_kzalloc(&pdev->dev, sizeof(*mci), GFP_KERNEL);
 	if (!mci)
 		return -ENOMEM;
 
 	mci->dev = &pdev->dev;
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	mci->bc12_sel = MTK_CTD_BY_EXTCHG;
-#else
 	mci->bc12_sel = MTK_CTD_BY_SUBPMIC;
-#endif
 	init_waitqueue_head(&mci->attach_wq);
 	atomic_set(&mci->chrdet_start, 0);
 	mutex_init(&mci->attach_lock);
@@ -415,17 +310,24 @@ static int mtk_ctd_probe(struct platform_device *pdev)
 
 	mtk_ctd_parse_dt(mci);
 
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+	mci->bc12_psy = power_supply_get_by_name("ext_charger_type");
+	if (IS_ERR_OR_NULL(mci->bc12_psy)) {
+		dev_err(&pdev->dev, "%s get ext_charger_type chg psy failed\n", __func__);
+	}
+#else
 	mci->bc12_psy = devm_power_supply_get_by_phandle(&pdev->dev,
 							"bc12");
-	if (IS_ERR_OR_NULL(mci->bc12_psy)) {
-		mci->bc12_psy = devm_power_supply_get_by_phandle(&pdev->dev,
-						       "bc12_2nd");
-		if (IS_ERR_OR_NULL(mci->bc12_psy)) {
-			dev_notice(&pdev->dev, "Failed to get charger psy\n");
-			return PTR_ERR(mci->bc12_psy);
-		}
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+	if (IS_ERR(mci->bc12_psy)) {
+		dev_notice(&pdev->dev, "Failed to get charger psy, no device\n");
+		return PTR_ERR(mci->bc12_psy);
+	} else if (!mci->bc12_psy) {
+		dev_notice(&pdev->dev, "Failed to get charger psy, charger psy is not ready\n");
+		return -EPROBE_DEFER;
 	}
-	pr_notice("%s charger psy name: %s\n", __func__, mci->bc12_psy->desc->name);
 
 	mci->tcpc_dev = tcpc_dev_get_by_name("type_c_port0");
 	if (!mci->tcpc_dev) {
@@ -453,10 +355,6 @@ static int mtk_ctd_probe(struct platform_device *pdev)
 		pr_notice("%s: run typec attach kthread fail\n", __func__);
 		return PTR_ERR(mci->attach_task);
 	}
-
-	INIT_WORK(&mci->mmi_hardreset_work,
-					mmi_pd_hardreset_work);
-
 	dev_info(mci->dev, "%s: successfully\n", __func__);
 	return 0;
 }
@@ -490,7 +388,7 @@ static int __init mtk_ctd_init(void)
 {
 	return platform_driver_register(&mtk_ctd_driver);
 }
-device_initcall_sync(mtk_ctd_init);
+late_initcall_sync(mtk_ctd_init);
 
 static void __exit mtk_ctd_exit(void)
 {

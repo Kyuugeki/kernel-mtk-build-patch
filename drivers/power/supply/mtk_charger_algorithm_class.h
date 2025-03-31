@@ -22,7 +22,6 @@
 #define PDC_ID   1 << 2
 #define PE4_ID   1 << 3
 #define PE5_ID   1 << 4
-#define WLC_ID   1 << 5
 
 struct chg_alg_properties {
 	const char *alias_name;
@@ -33,6 +32,7 @@ struct chg_alg_properties {
  * ALG_TA_NOT_SUPPORT: TA does not support
  * ALG_TA_CHECKING: checking TA
  * ALG_NOT_READY: TA support & not meet the conditions
+ * ALG_WAIVER: alg waives being executed
  * ALG_READY: TA support & meet the conditions
  * ALG_RUNNING: alg is running
  * ALG_DONE: alg done
@@ -42,6 +42,7 @@ enum chg_alg_state {
 	ALG_TA_CHECKING,
 	ALG_TA_NOT_SUPPORT,
 	ALG_NOT_READY,
+	ALG_WAIVER,
 	ALG_READY,
 	ALG_RUNNING,
 	ALG_DONE,
@@ -94,7 +95,6 @@ enum chg_alg_notifier_events {
 	EVT_VBUSOVP_ALARM,
 	EVT_BATPRO_DONE,
 	EVT_ALGO_STOP,
-	EVT_VDM_VERIFY,
 	EVT_MAX,
 };
 
@@ -110,8 +110,6 @@ struct chg_limit_setting {
 	int input_current_limit_dvchg1;
 	int charging_current_limit1;
 	int charging_current_limit2;
-	int mmi_fcc_limit;
-	int mmi_current_limit_dvchg1;
 	bool vbat_mon_en;
 };
 
@@ -119,7 +117,6 @@ enum chg_alg_props {
 	ALG_MAX_VBUS,
 	ALG_LOG_LEVEL,
 	ALG_REF_VBAT,
-	ALG_WLC_STATE, //wireless chip state
 };
 
 struct chg_alg_ops {

@@ -34,12 +34,8 @@ MODULE_LICENSE("GPL v2");
 struct device_node	*usb_node;
 static int		iddig_eint_num;
 static ktime_t		ktime_start, ktime_end;
-#ifndef CONFIG_MOTO_CHARGER_SGM415XX
 static struct		regulator *reg_vbus;
-#else
-#include <../drivers/power/supply/charger_class.h>
-static struct charger_device *primary_charger;
-#endif
+
 static struct musb_fifo_cfg fifo_cfg_host[] = {
 { .hw_ep_num = 1, .style = FIFO_TX,
 		.maxpacket = 512, .mode = BUF_SINGLE},
@@ -123,7 +119,6 @@ void set_usb_phy_clear(void)
 
 static void _set_vbus(int is_on)
 {
-#ifndef CONFIG_MOTO_CHARGER_SGM415XX
 	if (!reg_vbus) {
 		DBG(0, "vbus_init\n");
 		reg_vbus = regulator_get(mtk_musb->controller, "usb-otg-vbus");
@@ -132,24 +127,14 @@ static void _set_vbus(int is_on)
 			return;
 		}
 	}
-#else
-	if (!primary_charger) {
-		DBG(0, "vbus_init<%d>\n", vbus_on);
 
-		primary_charger = get_charger_by_name("primary_chg");
-		if (!primary_charger) {
-			DBG(0, "get primary charger device failed\n");
-			return;
-		}
-	}
-#endif
 	DBG(0, "op<%d>, status<%d>\n", is_on, vbus_on);
 	if (is_on && !vbus_on) {
 		/* update flag 1st then enable VBUS to make
 		 * host mode correct used by PMIC
 		 */
 		vbus_on = true;
-#ifndef CONFIG_MOTO_CHARGER_SGM415XX
+
 		if (regulator_set_voltage(reg_vbus, 5000000, 5000000))
 			DBG(0, "vbus regulator set voltage failed\n");
 
@@ -158,40 +143,16 @@ static void _set_vbus(int is_on)
 
 		if (regulator_enable(reg_vbus))
 			DBG(0, "vbus regulator enable failed\n");
-#else
-		charger_dev_enable_otg(primary_charger, true);
-		charger_dev_set_boost_current_limit(primary_charger, 1200000);
-#endif
+
 	} else if (!is_on && vbus_on) {
 		/* disable VBUS 1st then update flag
 		 * to make host mode correct used by PMIC
 		 */
 		vbus_on = false;
-#ifndef CONFIG_MOTO_CHARGER_SGM415XX
 		regulator_disable(reg_vbus);
-#else
-		charger_dev_enable_otg(primary_charger, false);
-#endif
 	}
 }
 
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-void sgm4154x_usb_set_vbus(struct musb *musb, int is_on)
-{
-#ifndef FPGA_PLATFORM
-
-	DBG(0, "is_on<%d>, control<%d>\n", is_on, vbus_control);
-
-	if (!vbus_control)
-		return;
-
-	if (is_on)
-		_set_vbus(1);
-	else
-		_set_vbus(0);
-#endif
-}
-#endif
 int mt_usb_get_vbus_status(struct musb *musb)
 {
 	return true;
@@ -385,6 +346,20 @@ static void do_host_plug_test_work(struct work_struct *data)
 
 #define ID_PIN_WORK_RECHECK_TIME 30	/* 30 ms */
 #define ID_PIN_WORK_BLOCK_TIMEOUT 30000 /* 30000 ms */
+struct usb_role_switch {
+	struct device dev;
+	struct mutex lock; /* device lock*/
+	enum usb_role role;
+
+	/* From descriptor */
+	struct device *usb2_port;
+	struct device *usb3_port;
+	struct device *udc;
+	usb_role_switch_set_t set;
+	usb_role_switch_get_t get;
+	bool allow_userspace_control;
+};
+
 static void do_host_work(struct work_struct *data)
 {
 	u8 devctl = 0;
@@ -461,9 +436,7 @@ static void do_host_work(struct work_struct *data)
 
 		if (!mtk_musb->host_suspend)
 			__pm_stay_awake(mtk_musb->usb_lock);
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-		sgm4154x_usb_set_vbus(mtk_musb, 1);
-#endif
+
 		/* this make PHY operation workable */
 		musb_platform_enable(mtk_musb);
 
@@ -514,9 +487,7 @@ static void do_host_work(struct work_struct *data)
 		musb_writeb(mtk_musb->mregs, MUSB_DEVCTL, 0);
 		if (mtk_musb->usb_lock->active)
 			__pm_relax(mtk_musb->usb_lock);
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-		sgm4154x_usb_set_vbus(mtk_musb, 0);
-#endif
+
 		/* for no VBUS sensing IP */
 		/* phy_set_mode(glue->phy, PHY_MODE_INVALID); */
 		set_usb_phy_mode(PHY_MODE_INVALID);
@@ -543,6 +514,8 @@ static void do_host_work(struct work_struct *data)
 	}
 	DBG(0, "work end, is_host=%d\n", mtk_musb->is_host);
 	up(&mtk_musb->musb_lock);
+
+	kobject_uevent(&glue->otg_sx.role_sw->dev.kobj, KOBJ_CHANGE);
 
 	/* Wait for irq All done */
 	synchronize_irq(mtk_musb->nIrq);

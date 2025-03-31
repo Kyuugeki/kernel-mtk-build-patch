@@ -16,7 +16,6 @@
 #include <linux/sysfs.h>
 #include <linux/wait.h>
 #include <linux/ktime.h>
-#include <linux/power/moto_chg_tcmd.h>
 #include "mtk_gauge.h"
 
 
@@ -114,20 +113,10 @@ enum battery_property {
 	BAT_PROP_FG_RESET,
 	BAT_PROP_LOG_LEVEL,
 	BAT_PROP_TEMP_TH_GAP,
-	BAT_PROP_BATTERY_CYCLE,
+/*TN Begin modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
+	BAT_PROP_REMAINING_CAP,
+/*TN Begin modified by zelin.pan/860620 20230829 CR/EKFOGO4G-1036*/
 };
-
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-struct usb_data {
-	struct power_supply_desc psd;
-	struct power_supply_config psy_cfg;
-	struct power_supply *psy;
-	struct power_supply *chg_psy;
-
-	int usb_online;
-	int charger_vol;
-};
-#endif
 
 struct battery_data {
 	struct power_supply_desc psd;
@@ -143,10 +132,6 @@ struct battery_data {
 	/* Add for Battery Service */
 	int bat_batt_vol;
 	int bat_batt_temp;
-//#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-//	int charger_vol;
-//#endif
-	struct moto_chg_tcmd_client bat_tcmd_client;//moto add
 };
 
 struct VersionControl {
@@ -829,11 +814,10 @@ struct simulator_log {
 #define SHUTDOWN_TIME 40
 #define AVGVBAT_ARRAY_SIZE 30
 #define INIT_VOLTAGE 3450
-#ifdef MTK_BASE
-#define BATTERY_SHUTDOWN_TEMPERATURE 60
-#else
-#define BATTERY_SHUTDOWN_TEMPERATURE 80
-#endif
+/*TN Begin modified by zelin.pan/860620 20230920 CR/EKFOGO4G-2183*/
+#define BATTERY_SHUTDOWN_TEMPERATURE 72
+/*TN End modified by zelin.pan/860620 20230920 CR/EKFOGO4G-2183*/
+
 struct shutdown_condition {
 	bool is_overheat;
 	bool is_soc_zero_percent;
@@ -915,9 +899,7 @@ struct mtk_battery {
 	struct hrtimer fg_hrtimer;
 	struct mutex ops_lock;
 	struct mutex fg_update_lock;
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	struct usb_data usb_data;
-#endif
+
 	struct battery_data bs_data;
 	struct mtk_coulomb_service cs;
 	struct mtk_gauge *gauge;
@@ -941,6 +923,7 @@ struct mtk_battery {
 	bool is_probe_done;
 	bool disable_nafg_int;
 	bool disableGM30;
+	bool disable_bs_psy;
 	bool ntc_disable_nafg;
 	bool cmd_disable_nafg;
 
@@ -1035,7 +1018,6 @@ struct mtk_battery {
 	int bat_cycle_thr;
 	int bat_cycle_car;
 	int bat_cycle_ncar;
-	int bat_cycle_count;
 
 	/* power misc */
 	struct shutdown_controller sdc;
@@ -1091,7 +1073,6 @@ struct mtk_battery {
 	/* battery temperature table */
 	int no_bat_temp_compensate;
 	int enable_tmp_intr_suspend;
-	int fg_current_pn_label;
 	struct battery_temperature_table rbat;
 	struct fg_temp *tmp_table;
 
@@ -1158,7 +1139,9 @@ extern void set_shutdown_vbat_lt(struct mtk_battery *gm,
 	int vbat_lt, int vbat_lt_lv1);
 extern void fg_sw_bat_cycle_accu(struct mtk_battery *gm);
 extern void notify_fg_chr_full(struct mtk_battery *gm);
-extern int fgauge_get_profile_id(void);
+/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
+extern int fgauge_get_profile_id(struct mtk_battery *gm);
+/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2017*/
 extern void disable_fg(struct mtk_battery *gm);
 extern int get_shutdown_cond(struct mtk_battery *gm);
 extern int get_shutdown_cond_flag(struct mtk_battery *gm);
@@ -1173,5 +1156,5 @@ extern void do_fg_algo(struct mtk_battery *gm, unsigned int intr_num);
 extern void fg_bat_temp_int_internal(struct mtk_battery *gm);
 /* mtk_battery_algo.c end */
 extern void disable_all_irq(struct mtk_battery *gm);
-extern int mmi_batt_health_check(void);
+
 #endif /* __MTK_BATTERY_INTF_H__ */

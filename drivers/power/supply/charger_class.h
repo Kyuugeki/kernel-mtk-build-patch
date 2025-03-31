@@ -21,18 +21,6 @@ enum adc_channel {
 	ADC_CHANNEL_TS,
 	ADC_CHANNEL_TBAT,
 	ADC_CHANNEL_VOUT,
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-	ADC_CHANNEL_VREFTS,
-#endif
-};
-
-enum mmi_dvchg_mux_channel {
-	MMI_DVCHG_MUX_NONE,
-	MMI_DVCHG_MUX_CHG_OPEN,
-	MMI_DVCHG_MUX_OTG_OPEN,
-	MMI_DVCHG_MUX_CLOSE,
-	MMI_DVCHG_MUX_MANUAL_OPEN,
-	MMI_DVCHG_MUX_DISABLE,
 };
 
 struct charger_properties {
@@ -106,6 +94,11 @@ struct charger_ops {
 	int (*set_constant_voltage)(struct charger_device *dev, u32 uV);
 	int (*get_constant_voltage)(struct charger_device *dev, u32 *uV);
 
+	/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+	int (*set_dp)(struct charger_device *dev, u32 uV);
+	int (*set_dm)(struct charger_device *dev, u32 uV);
+	/*TN End modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+
 	/* set input_current */
 	int (*get_input_current)(struct charger_device *dev, u32 *uA);
 	int (*set_input_current)(struct charger_device *dev, u32 uA);
@@ -163,6 +156,17 @@ struct charger_ops {
 	int (*set_vbusovp_alarm)(struct charger_device *dev, u32 uV);
 	int (*reset_vbusovp_alarm)(struct charger_device *dev);
 	int (*is_vbuslowerr)(struct charger_device *dev, bool *err);
+/*TN Begin modified by hao.jia/809321 20230830 CR/EKFOGO4G-1677*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+	int (*is_vbushigher)(struct charger_device *dev, bool *err);
+	int (*is_vbat_present)(struct charger_device *dev, bool *present);
+	int (*is_vbus_present)(struct charger_device *dev, bool *present);
+	int (*enable_dpdm_hz)(struct charger_device *dev);
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+	int (*enable_acdrv1)(struct charger_device *dev, bool en);
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#endif
+/*TN End modified by hao.jia/809321 20230830 CR/EKFOGO4G-1677*/
 	int (*init_chip)(struct charger_device *dev);
 
 	/* OTG */
@@ -184,7 +188,9 @@ struct charger_ops {
 	int (*is_charging_done)(struct charger_device *dev, bool *done);
 	int (*set_pe20_efficiency_table)(struct charger_device *dev);
 	int (*dump_registers)(struct charger_device *dev);
-
+/*TN Begin modified by zhen.liu11/860655 20230912 CR/EKFOGO4G-1483*/
+	int (*enable_adc)(struct charger_device *dev, bool enable);
+/*TN End modified by zhen.liu11/860655 20230912 CR/EKFOGO4G-1483*/
 	int (*get_adc)(struct charger_device *dev, enum adc_channel chan,
 		       int *min, int *max);
 	int (*get_adc_accuracy)(struct charger_device *dev,
@@ -195,11 +201,7 @@ struct charger_ops {
 	int (*get_tchg_adc)(struct charger_device *dev, int *tchg_min,
 		int *tchg_max);
 	int (*get_zcv)(struct charger_device *dev, u32 *uV);
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-	int (*get_vrefts_adc)(struct charger_device *dev, int *uV);
-	int (*get_ts_adc)(struct charger_device *dev, int *uV);
-	int (*enable_mos_short)(struct charger_device *dev, bool en);
-#endif
+
 	/* TypeC */
 	int (*enable_usbid)(struct charger_device *dev, bool en);
 	int (*set_usbid_rup)(struct charger_device *dev, u32 rup);
@@ -216,15 +218,6 @@ struct charger_ops {
 	int (*get_property)(struct charger_device *dev,
 			    enum charger_property prop,
 			    union charger_propval *val);
-
-	/* mux*/
-	int (*config_mux)(struct charger_device *dev,
-			enum mmi_dvchg_mux_channel typec_mos,
-			enum mmi_dvchg_mux_channel wls_mos);
-
-	/* enable adc*/
-	int (*enable_adc)(struct charger_device *dev, bool en);
-
 };
 
 static inline void *charger_dev_get_drvdata(
@@ -282,6 +275,14 @@ extern int charger_dev_set_constant_voltage(
 	struct charger_device *charger_dev, u32 uV);
 extern int charger_dev_get_constant_voltage(
 	struct charger_device *charger_dev, u32 *uV);
+
+/*TN Begin modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+extern int charger_dev_set_dp_voltage(
+	struct charger_device *charger_dev, u32 uV);
+extern int charger_dev_set_dm_voltage(
+	struct charger_device *charger_dev, u32 uV);
+/*TN End modified by zelin.pan/860620 20230916 CR/EKFOGO4G-2062*/
+
 extern int charger_dev_dump_registers(
 	struct charger_device *charger_dev);
 extern int charger_dev_enable_vbus_ovp(
@@ -318,14 +319,6 @@ extern int charger_dev_set_boost_current_limit(
 	struct charger_device *charger_dev, u32 uA);
 extern int charger_dev_get_zcv(
 	struct charger_device *charger_dev, u32 *uV);
-#ifdef CONFIG_MOTO_JP_TYPECOTP_SUPPORT
-extern int charger_dev_get_vrefts(
-	struct charger_device *charger_dev, int *uV);
-extern int charger_dev_get_ts(
-	struct charger_device *charger_dev, int *uV);
-extern int charger_dev_enable_mos_short(
-	struct charger_device *charger_dev, bool en);
-#endif
 extern int charger_dev_run_aicl(
 	struct charger_device *charger_dev, u32 *uA);
 extern int charger_dev_reset_eoc_state(
@@ -356,6 +349,10 @@ extern int charger_dev_enable_direct_charging(
 	struct charger_device *charger_dev, bool en);
 extern int charger_dev_kick_direct_charging_wdt(
 	struct charger_device *charger_dev);
+/*TN Begin modified by zhen.liu11/860655 20230912 CR/EKFOGO4G-1483*/
+extern int charger_dev_enable_adc(
+	struct charger_device *charger_dev, bool enable);
+/*TN End modified by zhen.liu11/860655 20230912 CR/EKFOGO4G-1483*/
 extern int charger_dev_get_adc(struct charger_device *charger_dev,
 	enum adc_channel chan, int *min, int *max);
 extern int charger_dev_get_adc_accuracy(struct charger_device *charger_dev,
@@ -386,6 +383,17 @@ extern int charger_dev_set_vbusovp_alarm(struct charger_device *chg_dev,
 					 u32 uV);
 extern int charger_dev_reset_vbusovp_alarm(struct charger_device *chg_dev);
 extern int charger_dev_is_vbuslowerr(struct charger_device *chg_dev, bool *err);
+/*TN Begin modified by hao.jia/809321 20230830 CR/EKFOGO4G-1677*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+extern int charger_dev_is_vbushigher(struct charger_device *chg_dev, bool *err);
+extern int charger_dev_is_vbat_present(struct charger_device *chg_dev, bool *present);
+extern int charger_dev_is_vbus_present(struct charger_device *chg_dev, bool *present);
+extern int charger_dev_enable_dpdm_hz(struct charger_device *chg_dev);
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+extern int charger_dev_enable_acdrv1(struct charger_device *charger_dev, bool en);
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#endif
+/*TN End modified by hao.jia/809321 20230830 CR/EKFOGO4G-1677*/
 extern int charger_dev_init_chip(struct charger_device *chg_dev);
 
 /* TypeC */
@@ -419,7 +427,5 @@ extern int unregister_charger_device_notifier(
 extern int charger_dev_notify(
 	struct charger_device *charger_dev, int event);
 
-extern int charger_dev_config_mux(struct charger_device *chg_dev,
-	enum mmi_dvchg_mux_channel typec_mos, enum mmi_dvchg_mux_channel wls_mos);
-extern int charger_dev_enable_adc(struct charger_device *chg_dev, bool en);
+
 #endif /*LINUX_POWER_CHARGER_CLASS_H*/

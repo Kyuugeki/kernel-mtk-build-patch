@@ -1,0 +1,11 @@
+ifdef CONFIG_OEM_AW9610X
+	AW9610X_OBJS += aw_sar_comm_interface.o
+	AW9610X_OBJS += aw_update_fw.o
+	AW9610X_OBJS += aw_sar.o
+	AW9610X_OBJS += ./aw9610x/aw9610x.o
+	AW9610X_OBJS += ./aw963xx/aw963xx.o
+	AW9610X_OBJS += ./aw9620x/aw9620x.o
+endif
+
+obj-$(CONFIG_OEM_AW9610X) += oem_aw9610x.o
+oem_aw9610x-y := $(AW9610X_OBJS)

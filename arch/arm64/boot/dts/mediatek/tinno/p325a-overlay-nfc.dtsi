@@ -1,0 +1,19 @@
+/*[TN.NJDC] ntc overlay file.start*/
+
+/*yangyong add for NXP NFC PN560UK begin*/
+&i2c3 {
+        clock-frequency = <400000>;
+
+        pn544: pn544@28 {
+                compatible = "nxp,pn544";
+                reg = <0x28>;
+                nxp,pn544-irq = <&pio 5 0>;
+                nxp,pn544-ven = <&pio 1  0>;
+                //nxp,pn544-fw-dwnld = <&pio 11  0>;
+                //nxp,pn544-iso-pwr-rst
+                status = "okay";
+        };
+};
+/*yangyong add for NXP NFC PN560UK end*/
+
+/*[TN.NJDC] ntc overlay file.end*/

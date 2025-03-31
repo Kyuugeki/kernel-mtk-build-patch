@@ -11,21 +11,6 @@
 
 extern void MAIN2AF_PowerDown(void);
 
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-#define VIB_ResetPos VIB_ResetPos_Main
-extern void VIB_ResetPos_Main(unsigned long a_u4Position);
-#endif
-
-#define MOT_DEVONN_DW9800VAF_SetI2Cclient MOT_DEVONN_DW9800VAF_SetI2Cclient_Main
-#define MOT_DEVONN_DW9800VAF_Ioctl MOT_DEVONN_DW9800VAF_Ioctl_Main
-#define MOT_DEVONN_DW9800VAF_Release MOT_DEVONN_DW9800VAF_Release_Main
-#define MOT_DEVONN_DW9800VAF_GetFileName MOT_DEVONN_DW9800VAF_GetFileName_Main
-extern int MOT_DEVONN_DW9800VAF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient,
-				 spinlock_t *pAF_SpinLock, int *pAF_Opened);
-extern long MOT_DEVONN_DW9800VAF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
-			   unsigned long a_u4Param);
-extern int MOT_DEVONN_DW9800VAF_Release(struct inode *a_pstInode, struct file *a_pstFile);
-extern int MOT_DEVONN_DW9800VAF_GetFileName(unsigned char *pFileName);
 #define AK7371AF_SetI2Cclient AK7371AF_SetI2Cclient_Main
 #define AK7371AF_Ioctl AK7371AF_Ioctl_Main
 #define AK7371AF_Release AK7371AF_Release_Main
@@ -244,6 +229,21 @@ extern int GT9764AF_Release(struct inode *a_pstInode, struct file *a_pstFile);
 extern int GT9764AF_PowerDown(struct i2c_client *pstAF_I2Cclient,
 				int *pAF_Opened);
 extern int GT9764AF_GetFileName(unsigned char *pFileName);
+extern unsigned long GT9764AF_GetCurrentPos(void);
+
+#define GT9768AF_SetI2Cclient GT9768AF_SetI2Cclient_Main
+#define GT9768AF_Ioctl GT9768AF_Ioctl_Main
+#define GT9768AF_Release GT9768AF_Release_Main
+#define GT9768AF_PowerDown GT9768AF_PowerDown_Main
+#define GT9768AF_GetFileName GT9768AF_GetFileName_Main
+extern int GT9768AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient,
+				spinlock_t *pAF_SpinLock, int *pAF_Opened);
+extern long GT9768AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
+				unsigned long a_u4Param);
+extern int GT9768AF_Release(struct inode *a_pstInode, struct file *a_pstFile);
+extern int GT9768AF_PowerDown(struct i2c_client *pstAF_I2Cclient,
+				int *pAF_Opened);
+extern int GT9768AF_GetFileName(unsigned char *pFileName);
 
 #define LC898122AF_SetI2Cclient LC898122AF_SetI2Cclient_Main
 #define LC898122AF_Ioctl LC898122AF_Ioctl_Main
@@ -374,52 +374,4 @@ extern long WV511AAF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
 extern int WV511AAF_Release(struct inode *a_pstInode, struct file *a_pstFile);
 extern int WV511AAF_GetFileName(unsigned char *pFileName);
 
-//Begin: Add lens driver interface for Vicky
-#define MOT_VICKY_GT9764_SetI2CClient MOT_VICKY_GT9764AF_SetI2Cclient
-#define MOT_VICKY_GT9764_Ioctl MOT_VICKY_GT9764AF_Ioctl
-#define MOT_VICKY_GT9764_Release MOT_VICKY_GT9764AF_Release
-#define MOT_VICKY_GT9764_PowerDown MOT_VICKY_GT9764AF_PowerDown
-#define MOT_VICKY_GT9764_GetFileName MOT_VICKY_GT9764AF_GetFileName
-extern int MOT_VICKY_GT9764AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient,
-				spinlock_t *pAF_SpinLock, int *pAF_Opened);
-extern long MOT_VICKY_GT9764AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
-				unsigned long a_u4Param);
-extern int MOT_VICKY_GT9764AF_Release(struct inode *a_pstInode, struct file *a_pstFile);
-extern int MOT_VICKY_GT9764AF_PowerDown(struct i2c_client *pstAF_I2Cclient,
-				int *pAF_Opened);
-extern int MOT_VICKY_GT9764AF_GetFileName(unsigned char *pFileName);
-//End
-
-//Begin: Add lens driver interface for Devonf
-#define MOT_DEVONF_GT9764_SetI2CClient MOT_DEVONF_GT9764AF_SetI2Cclient
-#define MOT_DEVONF_GT9764_Ioctl MOT_DEVONF_GT9764AF_Ioctl
-#define MOT_DEVONF_GT9764_Release MOT_DEVONF_GT9764AF_Release
-#define MOT_DEVONF_GT9764_PowerDown MOT_DEVONF_GT9764AF_PowerDown
-#define MOT_DEVONF_GT9764_GetFileName MOT_DEVONF_GT9764AF_GetFileName
-extern int MOT_DEVONF_GT9764AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient,
-				spinlock_t *pAF_SpinLock, int *pAF_Opened);
-extern long MOT_DEVONF_GT9764AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
-				unsigned long a_u4Param);
-extern int MOT_DEVONF_GT9764AF_Release(struct inode *a_pstInode, struct file *a_pstFile);
-extern int MOT_DEVONF_GT9764AF_PowerDown(struct i2c_client *pstAF_I2Cclient,
-				int *pAF_Opened);
-extern int MOT_DEVONF_GT9764AF_GetFileName(unsigned char *pFileName);
-//End
-
-//Begin: Add lens driver interface for CANCUNF
-#define MOT_CANCUNF_AW86006_SetI2Cclient MOT_CANCUNF_AW86006AF_SetI2Cclient
-#define MOT_CANCUNF_AW86006_Ioctl MOT_CANCUNF_AW86006AF_Ioctl
-#define MOT_CANCUNF_AW86006_Release MOT_CANCUNF_AW86006AF_Release
-#define MOT_CANCUNF_AW86006_PowerDown MOT_CANCUNF_AW86006AF_PowerDown
-#define MOT_CANCUNF_AW86006_GetFileName MOT_CANCUNF_AW86006AF_GetFileName
-extern int MOT_CANCUNF_AW86006AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient,
-				spinlock_t *pAF_SpinLock, int *pAF_Opened);
-extern long MOT_CANCUNF_AW86006AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command,
-				unsigned long a_u4Param);
-extern int MOT_CANCUNF_AW86006AF_Release(struct inode *a_pstInode, struct file *a_pstFile);
-extern int MOT_CANCUNF_AW86006AF_PowerDown(struct i2c_client *pstAF_I2Cclient,
-				int *pAF_Opened);
-extern int MOT_CANCUNF_AW86006AF_GetFileName(unsigned char *pFileName);
-//End
-extern int aw86006_ois_init(struct i2c_client *pstI2Cclient);
 #endif

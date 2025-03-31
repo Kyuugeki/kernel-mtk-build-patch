@@ -24,8 +24,8 @@
 #define GPUFREQ_DVFS_ENABLE             (1)
 #define GPUFREQ_CUST_INIT_ENABLE        (0)
 #define GPUFREQ_CUST_INIT_OPPIDX        (0)
-/* misc setting control */
-#define GPUFREQ_MFG1_CONTROL_ENABLE     (1)
+#define GPUFREQ_SELF_CTRL_MTCMOS        (1)
+
 
 /**************************************************
  * Clock Setting
@@ -133,7 +133,7 @@ struct gpufreq_core_mask_info g_core_mask_table[] = {
 /**************************************************
  * SRAMRC Setting
  **************************************************/
-#define GPUFREQ_SAFE_VLOGIC             (60000)
+#define GPUFREQ_SAFE_VLOGIC             (55000)
 #define VSRAM_LEVEL_0                   (75000)
 #define VSRAM_LEVEL_1                   (80000)
 #define SRAM_PARK_VOLT                  (75000)
@@ -166,10 +166,61 @@ struct gpufreq_core_mask_info g_core_mask_table[] = {
 #define GPUFREQ_AGING_MOST_AGRRESIVE    (0)
 
 /**************************************************
+ * SPM MTCMOS Setting
+ **************************************************/
+/* bus protect control mask */
+
+#define MFG1_PROT_STEP0_WAY_EN_ON_MASK    (BIT(11) | BIT(12))
+#define MFG1_PROT_STEP0_WAY_EN_OFF_MASK		(BIT(12))
+#define MFG1_PROT_STEP0_WAY_EN_ON_MASK_ACK	(BIT(11) | BIT(12))
+#define MFG1_PROT_STEP0_WAY_EN_OFF_MASK_ACK	(BIT(12))
+#define MFG1_PROT_STEP1_0_MASK          (BIT(21))
+#define MFG1_PROT_STEP1_0_ACK_MASK      (BIT(21))
+#define MFG1_PROT_STEP1_1_MASK          (BIT(5) | BIT(6))
+#define MFG1_PROT_STEP1_1_ACK_MASK      (BIT(5) | BIT(6))
+#define MFG1_PROT_STEP2_0_MASK          (BIT(21) | BIT(22))
+#define MFG1_PROT_STEP2_0_ACK_MASK      (BIT(21) | BIT(22))
+#define MFG1_PROT_STEP2_1_MASK          (BIT(7))
+#define MFG1_PROT_STEP2_1_ACK_MASK      (BIT(7))
+/* power control register */
+#define PWR_STATUS                      (g_sleep + 0x16C)
+#define PWR_STATUS_2ND                  (g_sleep + 0x170)
+#define MFG0_PWR_CON                    (g_sleep + 0x308)
+#define MFG1_PWR_CON                    (g_sleep + 0x30C)
+#define MFG2_PWR_CON                    (g_sleep + 0x310)
+#define MFG3_PWR_CON                    (g_sleep + 0x314)
+/* power control bit mapping */
+#define PWR_RST_B                       BIT(0)
+#define PWR_ISO                         BIT(1)
+#define PWR_ON                          BIT(2)
+#define PWR_ON_2ND                      BIT(3)
+#define PWR_CLK_DIS                     BIT(4)
+#define SRAM_PDN                        BIT(8)
+#define SRAM_PDN_ACK                    BIT(12)
+/* power status bit mapping */
+#define MFG0_PWR_STA_MASK               BIT(2)
+#define MFG1_PWR_STA_MASK               BIT(3)
+#define MFG2_PWR_STA_MASK               BIT(4)
+#define MFG3_PWR_STA_MASK               BIT(5)
+/* bus protect register */
+#define INFRA_TOPAXI_PROTECTEN_SET      (g_infracfg_ao_base + 0x2A0)
+#define INFRA_TOPAXI_PROTECTSTA1        (g_infracfg_ao_base + 0x228)
+#define INFRA_TOPAXI_PROTECTEN_CLR      (g_infracfg_ao_base + 0x2A4)
+#define INFRA_TOPAXI_PROTECTEN_1_SET    (g_infracfg_ao_base + 0x2A8)
+#define INFRA_TOPAXI_PROTECTSTA1_1      (g_infracfg_ao_base + 0x258)
+#define INFRA_TOPAXI_PROTECTEN_1_CLR    (g_infracfg_ao_base + 0x2AC)
+#define INFRA_TOPAXI_PROTECTEN_2_SET    (g_infracfg_ao_base + 0x714)
+#define INFRA_TOPAXI_PROTECTSTA1_2      (g_infracfg_ao_base + 0x724)
+#define INFRA_TOPAXI_PROTECTEN_2_CLR    (g_infracfg_ao_base + 0x718)
+#define INFRA_PDN_MFG1_WAY_EN			(g_infra_bcrm_base  + 0x004C)
+
+/**************************************************
  * Enumeration MT6833
  **************************************************/
 enum gpufreq_segment {
 	MT6833_SEGMENT = 1,
+	MT6833M_SEGMENT,
+	MT6833T_SEGMENT,		//Reserve Segment
 };
 
 enum gpufreq_clk_src {
@@ -187,6 +238,7 @@ struct gpufreq_pmic_info {
 
 struct gpufreq_clk_info {
 	struct clk *clk_mux;
+	struct clk *clk_ref_mux;
 	struct clk *clk_main_parent;
 	struct clk *clk_sub_parent;
 	struct clk *subsys_bg3d;
@@ -416,5 +468,13 @@ unsigned int g_aging_table[][SIGNED_OPP_GPU_NUM] = {
 		0, 0, 0, 0, 0,                /* OPP 40~44 */
 	},
 };
+
+struct mt_gpufreq_power_table_info {
+	unsigned int gpufreq_khz;
+	unsigned int gpufreq_volt;
+	unsigned int gpufreq_power;
+};
+
+#define MT_GPUFREQ_STATIC_PWR_READY2USE
 
 #endif /* __GPUFREQ_MT6879_H__ */

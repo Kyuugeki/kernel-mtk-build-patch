@@ -29,6 +29,8 @@
 #define DEFAULT_CMD6_TIMEOUT_MS	500
 #define MIN_CACHE_EN_TIMEOUT_MS 1600
 
+extern int MY_card_FFU_update(struct mmc_card *card);
+
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -1925,6 +1927,14 @@ err:
 	return err;
 }
 
+/*for ffu by yang.chen1/860621*/
+int mmc_init_card_ffu(struct mmc_host *host, u32 ocr,
+	struct mmc_card *oldcard)
+{
+	mmc_init_card(host,ocr,oldcard);
+	return 0;
+}
+
 static int mmc_can_sleep(struct mmc_card *card)
 {
 	return (card && card->ext_csd.rev >= 3);
@@ -2289,6 +2299,10 @@ int mmc_attach_mmc(struct mmc_host *host)
 	err = mmc_init_card(host, rocr, NULL);
 	if (err)
 		goto err;
+
+#if IS_ENABLED(CONFIG_FACTORY_BUILD)
+	err = MY_card_FFU_update(host->card);
+#endif
 
 	mmc_release_host(host);
 	err = mmc_add_card(host->card);

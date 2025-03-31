@@ -1,0 +1,92 @@
+/*[TN.NJDC] fingerprint overlay file.start*/
+
+&spi5 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	goodix@0 {
+		compatible = "mediatek,fingerprint";
+		reg = <0>;
+		spi-max-frequency = <1000000>;
+		status = "okay";
+	};
+};
+
+
+&pio {
+    fpc_fpsensor_spi_default: state_fpsensor_spi_default {
+    };
+
+    fpc_fpsensor_fpc_rst_low: state_fpsensor_fpc_rst_low {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO21__FUNC_GPIO21>;
+            slew-rate = <1>;
+            output-low;
+        };
+    };
+
+    fpc_fpsensor_fpc_rst_high: state_fpsensor_fpc_rst_high {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO21__FUNC_GPIO21>;
+            slew-rate = <1>;
+            output-high;
+        };
+    };
+
+   fpc_fpsensor_fpc_power_high: state_fpsensor_fpc_power_high {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO22__FUNC_GPIO22>;
+            slew-rate = <1>;
+            output-high;
+        };
+    };
+
+    fpc_fpsensor_fpc_power_low: state_fpsensor_fpc_power_low {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO22__FUNC_GPIO22>;
+            slew-rate = <1>;
+            output-low;
+        };
+    };
+
+	fpc_fp_pins_spi: state_spi_mode {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO14__FUNC_SPI5_CSB>,
+					<PINMUX_GPIO16__FUNC_SPI5_CLK>,
+					<PINMUX_GPIO13__FUNC_SPI5_MI>,
+					<PINMUX_GPIO15__FUNC_SPI5_MO>;
+			drive-strength = <4>;
+		};
+	};
+};
+
+&fingerprint_fpc {
+	pinctrl-names = "fpsensor_spi_default", "fpsensor_fpc_rst_low", "fpsensor_fpc_rst_high", "fpsensor_fpc_power_high", "fpsensor_fpc_power_low";
+    pinctrl-0 = <&fpc_fpsensor_spi_default>;
+    pinctrl-1 = <&fpc_fpsensor_fpc_rst_low>;
+    pinctrl-2 = <&fpc_fpsensor_fpc_rst_high>;
+    pinctrl-3 = <&fpc_fpsensor_fpc_power_high>;
+    pinctrl-4 = <&fpc_fpsensor_fpc_power_low>;
+	pinctrl-5 = <&fpc_fp_pins_spi>;
+
+    fpc,enable-wakeup;
+    interrupt-parent = <&pio>;
+    interrupts = <8 0x2008>;
+    debounce = <8 0>;
+    fpc,power_ctl_gpio = <&pio 22 0x0>;
+    fpc,rst_gpio = <&pio 21 0x0>;
+    fpc,irq_gpio = <&pio 8 0>;
+	status = "okay";
+};
+
+
+&goodix_fp {
+    interrupt-parent = <&pio>;
+    interrupts = <8 IRQ_TYPE_EDGE_RISING 8 0>;
+    goodix_rst = <&pio 21 0x00>;
+    gf,gpio_irq = <&pio 8 0x00>;
+    goodix_vdd = <&pio 22 0x0>;
+    status = "okay";
+};
+
+/*[TN.NJDC] fingerprint overlay file.end*/

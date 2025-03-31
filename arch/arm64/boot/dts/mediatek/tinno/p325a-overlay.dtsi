@@ -1,0 +1,29 @@
+/*********************************************************
+p325a-overlay.dtsi -|
+                    |-- p325a-overlay-ntc.dtsi
+                    |-- p325a-overlay-key.dtsi
+                    |--	p325a-overlay-card.dtsi
+                    |-- p325a-overlay-audio.dtsi
+                    |-- p325a-overlay-camera.dtsi
+                    |-- p325a-overlay-charger.dtsi
+                    |-- p325a-overlay-sensor.dtsi
+                    |--	p325a-overlay-display.dtsi
+                    |-- p325a-overlay-touch.dtsi
+                    |-- p325a-overlay-fingerprint.dtsi
+		    |-- p325a-overlay-led.dtsi
+********************************************************/
+
+/*[TN.NJDC] all modules overlay files.start*/
+#include "p325a-overlay-ntc.dtsi"
+#include "p325a-overlay-key.dtsi"
+#include "p325a-overlay-card.dtsi"
+#include "p325a-overlay-audio.dtsi"
+#include "p325a-overlay-camera.dtsi"
+#include "p325a-overlay-charger.dtsi"
+#include "p325a-overlay-sensor.dtsi"
+#include "p325a-overlay-display.dtsi"
+#include "p325a-overlay-touch.dtsi"
+#include "p325a-overlay-fingerprint.dtsi"
+#include "p325a-overlay-led.dtsi"
+#include "p325a-overlay-nfc.dtsi"
+/*[TN.NJDC] all modules overlay files.end*/

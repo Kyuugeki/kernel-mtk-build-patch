@@ -1,0 +1,8 @@
+/*[TN.NJDC] led overlay file.start*/
+&regulator_vibrator {
+	short-volt = <3000000>;
+	long-volt = <3300000>;
+	short-duration = <70>;
+	slot_gpio = <&pio 18 0x0>;
+};
+/*[TN.NJDC] led overlay file.end*/

@@ -519,10 +519,6 @@ static void imgsensor_init_sensor_list(void)
 	}
 }
 
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-bool devonf_vcamio_reset = false;
-#endif
-
 /******************************************************************************
  * imgsensor_check_is_alive
  ******************************************************************************/
@@ -555,12 +551,6 @@ static inline int imgsensor_check_is_alive(struct IMGSENSOR_SENSOR *psensor)
 		PK_DBG("Sensor found ID = 0x%x\n", sensorID);
 		err = ERROR_NONE;
 	}
-
-#ifdef CONFIG_MOT_DEVONF_CAMERA_PROJECT
-	if (psensor->inst.sensor_idx == 0) {
-		devonf_vcamio_reset = true;
-	}
-#endif
 
 	imgsensor_hw_power(&pimgsensor->hw,
 			psensor,
@@ -1816,7 +1806,7 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_GET_PDAF_DATA:
 	case SENSOR_FEATURE_GET_4CELL_DATA:
 		{
-#define PDAF_DATA_SIZE 8192
+#define PDAF_DATA_SIZE 4096
 			char *pPdaf_data = NULL;
 			unsigned long long *pFeaturePara_64 =
 				(unsigned long long *)pFeaturePara;

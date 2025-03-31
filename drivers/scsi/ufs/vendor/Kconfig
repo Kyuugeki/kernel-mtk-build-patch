@@ -57,18 +57,6 @@ config UFSHID
 	help
 	  UFS HID Feature Enable
 
-config MICRON_UFSHID
-	bool "Micron UFS Host Initiated Defrag support"
-	depends on SCSI_UFSHCD && UFSFEATURE
-	help
-	  Micron UFS HID Feature Enable
-
-config SCSI_SKHID
-	bool "UFS Host Initiated Defrag supportr"
-	depends on (SCSI_UFSHCD || SCSI_UFSHCD_QTI)
-	help
-	  Activate or deactive SKHID driver
-
 config UFSHID_POC
 	bool "UFSHID_POC test"
 	depends on SCSI_UFSHCD && UFSFEATURE && UFSHID

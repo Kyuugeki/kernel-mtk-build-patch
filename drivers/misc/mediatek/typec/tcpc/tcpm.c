@@ -15,6 +15,16 @@
 #include "inc/pd_dpm_pdo_select.h"
 #endif	/* CONFIG_USB_POWER_DELIVERY */
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+#include "../../../../../oem/typec/aw35615/platform_helpers.h"
+static struct aw_tcpm_ops_ptr *aw_tcpm_ops;
+void tcpm_set_aw_pps_ops(struct aw_tcpm_ops_ptr *pps_ops)
+{
+	aw_tcpm_ops = pps_ops;
+}
+EXPORT_SYMBOL(tcpm_set_aw_pps_ops);
+#endif
 
 /* Check status */
 static int tcpm_check_typec_attached(struct tcpc_device *tcpc)
@@ -346,7 +356,19 @@ bool tcpm_inquire_pd_connected(
 	struct tcpc_device *tcpc)
 {
 	struct pd_port *pd_port = &tcpc->pd_port;
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
 
+	ret = aw_tcpm_ops->pd_connected(tcpc);
+	if (ret >= 0) {
+		if (ret)
+			return true;
+		else
+			return false;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	return pd_port->pe_data.pd_connected;
 }
 EXPORT_SYMBOL(tcpm_inquire_pd_connected);
@@ -391,7 +413,19 @@ uint8_t tcpm_inquire_pd_pe_ready(
 	struct tcpc_device *tcpc)
 {
 	struct pd_port *pd_port = &tcpc->pd_port;
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
 
+	ret = aw_tcpm_ops->pd_pe_ready(tcpc);
+	if (ret >= 0) {
+		if (ret)
+			return true;
+		else
+			return false;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	return pd_port->pe_data.pe_ready;
 }
 EXPORT_SYMBOL(tcpm_inquire_pd_pe_ready);
@@ -681,7 +715,19 @@ int tcpm_get_remote_power_cap(struct tcpc_device *tcpc,
 	struct pd_port *pd_port = &tcpc->pd_port;
 	struct tcpm_power_cap_val cap;
 	int i;
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
 
+	ret = aw_tcpm_ops->get_power_cap(tcpc, remote_cap);
+	if (ret >= 0) {
+		if (ret == 0)
+			return TCPM_SUCCESS;
+		else
+			return TCPM_ERROR_UNKNOWN;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	mutex_lock(&pd_port->pd_lock);
 	remote_cap->selected_cap_idx = pd_port->pe_data.remote_selected_cap;
 	remote_cap->nr = pd_port->pe_data.remote_src_cap.nr;
@@ -800,6 +846,20 @@ int tcpm_dpm_pd_power_swap(struct tcpc_device *tcpc,
 		.event_id = TCP_DPM_EVT_PR_SWAP_AS_SNK + role,
 	};
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
+
+	ret = aw_tcpm_ops->request_pr_swap(tcpc, role);
+	if (ret >= 0) {
+		if (ret == 0)
+			return TCPM_SUCCESS;
+		else
+			return TCPM_ERROR_UNKNOWN;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+
 	return tcpm_put_tcp_dpm_event_cbk1(
 		tcpc, &tcp_event, cb_data, TCPM_BK_PR_SWAP_TOUT);
 }
@@ -812,6 +872,19 @@ int tcpm_dpm_pd_data_swap(struct tcpc_device *tcpc,
 		.event_id = TCP_DPM_EVT_DR_SWAP_AS_UFP + role,
 	};
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
+
+	ret = aw_tcpm_ops->request_dr_swap(tcpc, role);
+	if (ret >= 0) {
+		if (ret == 0)
+			return TCPM_SUCCESS;
+		else
+			return TCPM_ERROR_UNKNOWN;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	return tcpm_put_tcp_dpm_event_cbk1(
 		tcpc, &tcp_event, cb_data, TCPM_BK_PD_CMD_TOUT);
 }
@@ -885,7 +958,29 @@ int tcpm_dpm_pd_request(struct tcpc_device *tcpc,
 		.tcp_dpm_data.pd_req.mv = mv,
 		.tcp_dpm_data.pd_req.ma = ma,
 	};
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
 
+	if (tcpc->pd_port.dpm_charging_policy == DPM_CHARGING_POLICY_PPS) {
+		ret = aw_tcpm_ops->request_apdo(tcpc, (uint16_t)mv, (uint16_t)ma);
+		if (ret >= 0) {
+			if (ret == 0)
+				return TCPM_SUCCESS;
+			else
+				return TCPM_ERROR_UNKNOWN;
+		}
+	} else {
+		ret = aw_tcpm_ops->request_pdo(tcpc, (uint16_t)mv, (uint16_t)ma);
+		if (ret >= 0) {
+			if (ret == 0)
+				return TCPM_SUCCESS;
+			else
+				return TCPM_ERROR_UNKNOWN;
+		}
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	return tcpm_put_tcp_dpm_event_cbk1(
 		tcpc, &tcp_event, cb_data, TCPM_BK_REQUEST_TOUT);
 }
@@ -967,6 +1062,19 @@ int tcpm_dpm_pd_get_status(struct tcpc_device *tcpc,
 		.event_id = TCP_DPM_EVT_GET_STATUS,
 	};
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+		int ret;
+		ret = aw_tcpm_ops->pd_get_status(tcpc, status);
+		if (ret >= 0) {
+			if (ret == 0)
+				return TCPM_SUCCESS;
+			else
+				return TCPM_ERROR_UNKNOWN;
+		}
+#endif /*CONFIG_OEM_TCPC_PD_AW35615*/
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+
 	return tcpm_put_tcp_dpm_event_cbk2(
 		tcpc, &tcp_event, cb_data, TCPM_BK_PD_CMD_TOUT,
 		(uint8_t *) status, PD_SDB_SIZE);
@@ -994,6 +1102,17 @@ int tcpm_dpm_pd_get_pps_status(struct tcpc_device *tcpc,
 	int ret;
 	struct pd_pps_status_raw pps_status_raw;
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	ret = aw_tcpm_ops->get_pps_status(tcpc, pps_status);
+	if (ret >= 0) {
+		if (ret == 0)
+			return TCPM_SUCCESS;
+		else
+			return TCPM_ERROR_UNKNOWN;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	ret = tcpm_dpm_pd_get_pps_status_raw(
 		tcpc, cb_data, &pps_status_raw);
 
@@ -1249,6 +1368,9 @@ int tcpm_inquire_dp_ufp_u_state(
 	int ret;
 	struct pd_port *pd_port = &tcpc->pd_port;
 
+	if (pd_get_dp_data(pd_port) == NULL)
+		return TCPM_ERROR_UNKNOWN;
+
 	ret = tcpm_check_pd_attached(tcpc);
 	if (ret != TCPM_SUCCESS)
 		return ret;
@@ -1286,6 +1408,9 @@ int tcpm_inquire_dp_dfp_u_state(
 {
 	int ret;
 	struct pd_port *pd_port = &tcpc->pd_port;
+
+	if (pd_get_dp_data(pd_port) == NULL)
+		return TCPM_ERROR_UNKNOWN;
 
 	ret = tcpm_check_pd_attached(tcpc);
 	if (ret != TCPM_SUCCESS)
@@ -1491,11 +1616,28 @@ int tcpm_set_pd_charging_policy(struct tcpc_device *tcpc,
 	};
 
 	struct pd_port *pd_port = &tcpc->pd_port;
-
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	/* PPS should call another function ... */
 	if ((policy & DPM_CHARGING_POLICY_MASK) >= DPM_CHARGING_POLICY_PPS)
 		return TCPM_ERROR_PARAMETER;
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	pd_port->dpm_charging_policy = policy;
+
+	ret = aw_tcpm_ops->request_pdo(tcpc, 5000, 2000);
+	if (ret >= 0) {
+		if (ret == 0)
+			return TCPM_SUCCESS;
+		else
+			return TCPM_ERROR_UNKNOWN;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	mutex_lock(&pd_port->pd_lock);
 	if (pd_port->dpm_charging_policy == policy) {
 		mutex_unlock(&pd_port->pd_lock);
@@ -1569,10 +1711,27 @@ int tcpm_set_apdo_charging_policy(struct tcpc_device *tcpc,
 	};
 
 	struct pd_port *pd_port = &tcpc->pd_port;
-
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	/* Not PPS should call another function ... */
 	if ((policy & DPM_CHARGING_POLICY_MASK) < DPM_CHARGING_POLICY_PPS)
 		return TCPM_ERROR_PARAMETER;
+
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	ret = aw_tcpm_ops->request_apdo(tcpc, (uint16_t)mv, (uint16_t)ma);
+	if (ret >= 0) {
+		pd_port->dpm_charging_policy = policy;
+		if (ret == 0)
+			return TCPM_SUCCESS;
+		else
+			return TCPM_ERROR_UNKNOWN;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 
 	mutex_lock(&pd_port->pd_lock);
 	if (pd_port->dpm_charging_policy == policy) {
@@ -1603,6 +1762,18 @@ int tcpm_inquire_pd_source_apdo(struct tcpc_device *tcpc,
 	int ret;
 	uint8_t i;
 	struct tcpm_power_cap cap;
+
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+		ret = aw_tcpm_ops->get_source_apdo(tcpc, apdo_type, cap_i, cap_val);
+		if (ret >= 0) {
+			if (ret == 0)
+				return TCPM_SUCCESS;
+			else
+				return TCPM_ERROR_NOT_FOUND;
+		}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 
 	ret = tcpm_inquire_pd_source_cap(tcpc, &cap);
 	if (ret != TCPM_SUCCESS)
@@ -1931,6 +2102,19 @@ bool tcpm_is_comm_capable(struct tcpc_device *tcpc)
 {
 	struct pd_port *pd_port = &tcpc->pd_port;
 
+/*TN Begin modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_AW35615)
+	int ret;
+
+	ret = aw_tcpm_ops->pd_comm_capable(tcpc);
+	if (ret >= 0) {
+		if (ret)
+			return true;
+		else
+			return false;
+	}
+#endif /* CONFIG_OEM_TCPC_PD_AW35615 */
+/*TN End modified by zhen.liu11/860655 20230819 CR/EKFOGO4G-1427*/
 	return pd_port->pe_data.dpm_flags & DPM_FLAGS_PARTNER_USB_COMM;
 }
 EXPORT_SYMBOL(tcpm_is_comm_capable);
@@ -1973,6 +2157,9 @@ static const char * const bk_event_ret_name[] = {
 static inline void tcpm_dpm_bk_copy_data(struct pd_port *pd_port)
 {
 	uint8_t size = pd_port->tcpm_bk_cb_data_max;
+
+	if (pd_get_msg_data_payload(pd_port) == NULL)
+		return;
 
 	if (size >= pd_get_msg_data_size(pd_port))
 		size = pd_get_msg_data_size(pd_port);

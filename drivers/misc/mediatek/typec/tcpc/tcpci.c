@@ -9,6 +9,7 @@
 #include <linux/time.h>
 #include <linux/slab.h>
 #include <linux/sched/clock.h>
+#include <asm/div64.h>
 
 #define TCPC_NOTIFY_OVERTIME	(20) /* ms */
 
@@ -36,7 +37,8 @@ static void tcp_notify_func(struct work_struct *work)
 	begin = local_clock();
 	srcu_notifier_call_chain(&tcpc->evt_nh[type], state, tcp_noti);
 	end = local_clock();
-	timeval = (end - begin) / NSEC_PER_USEC;
+	timeval = end - begin;
+	do_div(timeval, NSEC_PER_USEC);
 	PD_BUG_ON(timeval > (TCPC_NOTIFY_OVERTIME * 1000));
 #else
 	srcu_notifier_call_chain(&tcpc->evt_nh[type], state, tcp_noti);
@@ -70,11 +72,14 @@ static int tcpc_check_notify_time(struct tcpc_device *tcpc,
 #if CONFIG_PD_BEGUG_ON
 	struct timeval begin, end;
 	int timeval = 0;
+	uint64_t temp = 0;
 
 	do_gettimeofday(&begin);
 	ret = srcu_notifier_call_chain(&tcpc->evt_nh[type], state, tcp_noti);
 	do_gettimeofday(&end);
-	timeval = (timeval_to_ns(end) - timeval_to_ns(begin))/1000/1000;
+	temp = timeval_to_ns(end) - timeval_to_ns(begin);
+	do_div(temp, 1000 * 1000);
+	timeval = (int)temp;
 	PD_BUG_ON(timeval > TCPC_NOTIFY_OVERTIME);
 #else
 	ret = srcu_notifier_call_chain(&tcpc->evt_nh[type], state, tcp_noti);
@@ -412,6 +417,18 @@ int tcpci_is_vsafe0v(struct tcpc_device *tcpc)
 EXPORT_SYMBOL(tcpci_is_vsafe0v);
 #endif /* CONFIG_TCPC_VSAFE0V_DETECT_IC */
 
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+int tcpci_get_chip_id(struct tcpc_device *tcpc, uint32_t *chip_id)
+{
+	if (tcpc->ops->get_chip_id == NULL)
+		return -ENOTSUPP;
+	else
+		tcpc->ops->get_chip_id(tcpc, chip_id);
+
+	return 0;
+}
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
+
 #if CONFIG_WATER_DETECTION
 int tcpci_is_water_detected(struct tcpc_device *tcpc)
 {
@@ -634,17 +651,6 @@ int tcpci_notify_pd_state(struct tcpc_device *tcpc, uint8_t connect)
 		TCP_NOTIFY_IDX_USB, TCP_NOTIFY_PD_STATE);
 }
 EXPORT_SYMBOL(tcpci_notify_pd_state);
-
-int tcpci_notify_pd_vdm_verify(struct tcpc_device *tcpc, uint8_t vdm_verify)
-{
-	struct tcp_notify tcp_noti;
-	int ret;
-
-	tcp_noti.pd_state.vdm_verify = vdm_verify;
-	ret = tcpc_check_notify_time(tcpc, &tcp_noti,
-		TCP_NOTIFY_IDX_USB, TCP_NOTIFY_PD_VDM_VERIFY);
-	return ret;
-}
 
 int tcpci_set_intrst(struct tcpc_device *tcpc, bool en)
 {

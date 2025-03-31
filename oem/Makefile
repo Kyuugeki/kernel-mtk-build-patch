@@ -1,0 +1,12 @@
+obj-y += devinfo/
+obj-y += touchscreen/
+obj-y += smartpa/
+obj-y += sarsensor/
+obj-y += fingerprint/
+obj-y += charger_led/
+obj-y += nfc/
+obj-y += turbo_charger/
+obj-y += qc_logic/
+obj-y += switch_charger/
+obj-y += charger_pump/
+obj-y += typec/

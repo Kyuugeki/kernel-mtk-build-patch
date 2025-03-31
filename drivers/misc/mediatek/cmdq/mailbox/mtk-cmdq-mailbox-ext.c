@@ -242,6 +242,10 @@ void cmdq_get_usage_cb(struct mbox_chan *chan, cmdq_usage_cb usage_cb)
 	for (i = 0; i < ARRAY_SIZE(cmdq->thread); i++)
 		if (cmdq->thread[i].chan == chan)
 			break;
+	if (i >= ARRAY_SIZE(cmdq->thread)) {
+		cmdq_err("Input chan:%p is wrong", chan);
+		return;
+	}
 
 	cmdq->thread[i].usage_cb = usage_cb;
 }
@@ -268,7 +272,6 @@ void cmdq_dump_usage(void)
 	for (i = 0; i < 2; i++) {
 		if (!g_cmdq[i])
 			continue;
-
 		cmdq_msg(
 			"%s: hwid:%hu suspend:%d usage:%d mbox_usage:%d wake_lock:%d",
 			__func__, g_cmdq[i]->hwid, g_cmdq[i]->suspended,
@@ -652,6 +655,14 @@ static void cmdq_task_connect_buffer(struct cmdq_task *task,
 	task_base = (u64 *)(buf->va_base + CMDQ_CMD_BUFFER_SIZE -
 		task->pkt->avail_buf_size - CMDQ_INST_SIZE);
 	inst = *task_base;
+
+	if (!next_task) {
+		*task_base = (u64)CMDQ_JUMP_BY_OFFSET << 32 | 0x00000001;
+		cmdq_log("%s connect to null change last inst %#018llx to %#018llx connect 0x%p -> NULL",
+			__func__, inst, *task_base, task->pkt);
+		return;
+	}
+
 	*task_base = (u64)CMDQ_JUMP_BY_PA << 32 |
 		CMDQ_REG_SHIFT_ADDR(next_task->pa_base);
 	cmdq_log("change last inst 0x%016llx to 0x%016llx connect 0x%p -> 0x%p",
@@ -854,6 +865,12 @@ static void cmdq_task_exec(struct cmdq_pkt *pkt, struct cmdq_thread *thread)
 	task->thread = thread;
 	task->pkt = pkt;
 	task->exec_time = sched_clock();
+
+	if (atomic_read(&cmdq->mbox_usage) <= 0) {
+		cmdq_err("hwid:%hu usage:%d idx:%d gce off",
+			cmdq->hwid, atomic_read(&cmdq->usage), thread->idx);
+		dump_stack();
+	}
 
 	if (list_empty(&thread->task_busy_list)) {
 		if (mminfra_power_cb && !mminfra_power_cb()) {
@@ -1672,7 +1689,9 @@ void cmdq_thread_dump(struct mbox_chan *chan, struct cmdq_pkt *cl_pkt,
 /* if pc match end and irq flag on, dump irq status */
 	if (curr_pa == end_pa && irq) {
 		cmdq_util_msg("gic dump not support irq id:%u\n", cmdq->irq);
+#if IS_ENABLED(CONFIG_MTK_IRQ_DBG) || IS_ENABLED(CONFIG_MTK_IRQ_DBG_LEGACY)
 		mt_irq_dump_status(cmdq->irq);
+#endif
 	}
 
 	if (inst_out)
@@ -1834,7 +1853,7 @@ void cmdq_mbox_thread_remove_task(struct mbox_chan *chan,
 {
 	struct cmdq_thread *thread = (struct cmdq_thread *)chan->con_priv;
 	struct cmdq *cmdq = container_of(thread->chan->mbox, struct cmdq, mbox);
-	struct cmdq_task *task, *tmp;
+	struct cmdq_task *task, *tmp, *next_task, *prev_task;
 	unsigned long flags;
 	dma_addr_t pa_curr;
 	bool curr_task = false;
@@ -1886,6 +1905,12 @@ void cmdq_mbox_thread_remove_task(struct mbox_chan *chan,
 			/* task during error handling, skip */
 			spin_unlock_irqrestore(&thread->chan->lock, flags);
 			return;
+		}
+
+		if (!curr_task) {
+			next_task = last_task ? NULL : list_next_entry(task, list_entry);
+			prev_task = list_prev_entry(task, list_entry);
+			cmdq_task_connect_buffer(prev_task, next_task);
 		}
 
 		cmdq_task_exec_done(task, curr_task ? -ECONNABORTED : 0);
@@ -2258,6 +2283,7 @@ static int cmdq_probe(struct platform_device *pdev)
 	int err, i;
 	struct gce_plat *plat_data;
 	static u8 hwid;
+	char buf[NAME_MAX];
 
 	cmdq = devm_kzalloc(dev, sizeof(*cmdq), GFP_KERNEL);
 	if (!cmdq)
@@ -2416,7 +2442,8 @@ static int cmdq_probe(struct platform_device *pdev)
 		WARN_ON(clk_prepare(cmdq->clock_timer) < 0);
 	}
 
-	cmdq->wake_lock = wakeup_source_register(dev, "cmdq_pm_lock");
+	snprintf(buf, NAME_MAX, "cmdq_%d_pm_lock", cmdq->hwid);
+	cmdq->wake_lock = wakeup_source_register(dev, buf);
 
 	spin_lock_init(&cmdq->lock);
 
@@ -2429,8 +2456,10 @@ static int cmdq_probe(struct platform_device *pdev)
 
 	if (!of_parse_phandle_with_args(
 		dev->of_node, "iommus", "#iommu-cells", 0, &args)) {
+#if IS_ENABLED(CONFIG_MTK_IOMMU_MISC_DBG)
 		mtk_iommu_register_fault_callback(
 			args.args[0], cmdq_iommu_fault_callback, cmdq, false);
+#endif
 	}
 	return 0;
 }
@@ -2553,8 +2582,10 @@ s32 cmdq_mbox_disable(void *chan)
 
 	mbox_usage = atomic_dec_return(&cmdq->thread[i].usage);
 	if (mbox_usage < 0)
+		// cmdq_util_thread_module_dispatch(cmdq->base_pa, i)
 		cmdq_util_aee("CMDQ", "hwid:%hu idx:%d usage:d",
 			cmdq->hwid, i, mbox_usage);
+
 	cmdq_clk_disable(cmdq);
 
 	mutex_lock(&cmdq->mbox_mutex);
@@ -2661,6 +2692,17 @@ s32 cmdq_mbox_set_hw_id(void *cmdq_mbox)
 		return -EINVAL;
 	cmdq->hwid = (u8)cmdq_util_get_hw_id(cmdq->base_pa);
 	cmdq_util_prebuilt_set_client(cmdq->hwid, cmdq->prebuilt_clt);
+	return 0;
+}
+
+s32 cmdq_mbox_reset_hw_id(void *cmdq_mbox)
+{
+	struct cmdq *cmdq = cmdq_mbox;
+
+	if (!cmdq)
+		return -EINVAL;
+	cmdq_util_prebuilt_set_client(cmdq->hwid, NULL);
+	cmdq->hwid = 0;
 	return 0;
 }
 
@@ -3026,6 +3068,9 @@ void cmdq_set_outpin_event(struct cmdq_client *cl, bool ena)
 }
 EXPORT_SYMBOL(cmdq_set_outpin_event);
 
+#if IS_BUILTIN(CONFIG_MTK_CMDQ_MBOX_EXT)
+arch_initcall(cmdq_drv_init);
+#else
 module_init(cmdq_drv_init);
-
+#endif
 MODULE_LICENSE("GPL v2");

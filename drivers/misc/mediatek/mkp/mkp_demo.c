@@ -36,8 +36,6 @@
 #define mkp_debug 0
 DEBUG_SET_LEVEL(DEBUG_LEVEL_ERR);
 
-#define AUDIT_MODE 1
-
 struct work_struct *avc_work;
 
 static uint32_t g_ro_avc_handle __ro_after_init;
@@ -404,7 +402,7 @@ static void probe_android_vh_selinux_avc_lookup(void *ignore,
 	struct avc_sbuf_content *ro_avc_sharebuf_ptr;
 	int i;
 	struct mkp_avc_node *temp_node = NULL;
-	static DEFINE_RATELIMIT_STATE(rs_avc, 5*HZ, 5);
+	static DEFINE_RATELIMIT_STATE(rs_avc, 1*HZ, 10);
 
 	if (!node || g_ro_avc_handle == 0)
 		return;
@@ -609,7 +607,7 @@ exit:
 static void probe_android_vh_check_mmap_file(void *ignore,
 	const struct file *file, unsigned long prot, unsigned long flag, unsigned long ret)
 {
-	static DEFINE_RATELIMIT_STATE(rs_mmap, 5*HZ, 5);
+	static DEFINE_RATELIMIT_STATE(rs_mmap, 1*HZ, 10);
 
 	check_cred(&rs_mmap);
 	check_selinux_state(&rs_mmap);
@@ -617,7 +615,7 @@ static void probe_android_vh_check_mmap_file(void *ignore,
 
 static void probe_android_vh_check_file_open(void *ignore, const struct file *file)
 {
-	static DEFINE_RATELIMIT_STATE(rs_open, 5*HZ, 5);
+	static DEFINE_RATELIMIT_STATE(rs_open, 1*HZ, 10);
 
 	check_cred(&rs_open);
 	check_selinux_state(&rs_open);
@@ -626,7 +624,7 @@ static void probe_android_vh_check_file_open(void *ignore, const struct file *fi
 static void probe_android_vh_check_bpf_syscall(void *ignore,
 	int cmd, const union bpf_attr *attr, unsigned int size)
 {
-	static DEFINE_RATELIMIT_STATE(rs_bpf, 5*HZ, 5);
+	static DEFINE_RATELIMIT_STATE(rs_bpf, 1*HZ, 10);
 
 	check_cred(&rs_bpf);
 	check_selinux_state(&rs_bpf);
@@ -737,7 +735,6 @@ int __init mkp_demo_init(void)
 	unsigned long size = 0x100000;
 	struct device_node *node;
 	u32 mkp_policy = 0x0001ffff;
-	int mkp_mode = -1;
 
 	node = of_find_node_by_path("/chosen");
 	if (node) {
@@ -898,13 +895,8 @@ int __init mkp_demo_init(void)
 		}
 	}
 
-	/* More intensive per-task security checks. These should only be
-	 * enabled in the "AUDIT" mkp mode. */
-	mkp_mode = mkp_get_mode_hvc_call();
-	if ((mkp_mode == AUDIT_MODE) &&
-		(policy_ctrl[MKP_POLICY_TASK_CRED] ||
-		 policy_ctrl[MKP_POLICY_SELINUX_STATE])) {
-		pr_info("%s: MKP per-task checks enabled\n", __func__);
+	if (policy_ctrl[MKP_POLICY_TASK_CRED] ||
+		policy_ctrl[MKP_POLICY_SELINUX_STATE]) {
 		ret = register_trace_android_vh_check_mmap_file(
 				probe_android_vh_check_mmap_file, NULL);
 		if (ret) {

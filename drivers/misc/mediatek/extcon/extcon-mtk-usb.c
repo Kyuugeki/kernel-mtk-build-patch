@@ -19,13 +19,17 @@
 #include <linux/usb/role.h>
 #include <linux/workqueue.h>
 #include <linux/proc_fs.h>
-
+#include <linux/device.h>
 #include "extcon-mtk-usb.h"
 
 #if IS_ENABLED(CONFIG_TCPC_CLASS)
 #include "tcpm.h"
 #endif
-#include "mtk_charger.h"
+
+/*TN Begin modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
+static unsigned int cc_role = 0;
+static struct mtk_extcon_info *g_extcon;
+/*TN End modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
 
 static const unsigned int usb_extcon_cable[] = {
 	EXTCON_USB,
@@ -33,27 +37,82 @@ static const unsigned int usb_extcon_cable[] = {
 	EXTCON_NONE,
 };
 
-static int mmi_mux_typec_otg_chan(enum mmi_mux_channel channel, bool on)
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
+typedef enum {
+	CC1,
+	CC2,
+	CCNone
+} CC_Orientation;
+
+static int typec_polarity = CCNone;
+
+static ssize_t cc_orient_show(struct device *dev, struct device_attribute *attr,
+			  char *buf)
 {
-	struct mtk_charger *info = NULL;
-	struct power_supply *chg_psy = NULL;
-
-	chg_psy = power_supply_get_by_name("mtk-master-charger");
-	if (chg_psy == NULL || IS_ERR(chg_psy)) {
-		pr_err("%s Couldn't get chg_psy\n");
-		return 0;
-	} else {
-		info = (struct mtk_charger *)power_supply_get_drvdata(chg_psy);
-	}
-
-	pr_info("%s open typec OTG chan =%d, on = %d\n", __func__, channel, on);
-	if (info->algo.do_mux)
-		info->algo.do_mux(info, channel, on);
+	dev_info(dev, "typec cc orient %d\n", typec_polarity);
+	if (typec_polarity == CC1)
+		return snprintf(buf, 16, "%s\n", "CC1");
+	else if (typec_polarity == CC2)
+		return snprintf(buf, 16, "%s\n", "CC2");
 	else
-		pr_err("%s get info->algo.do_mux fail", __func__);
-
-	return 0;
+		return snprintf(buf, 16, "%s\n", "CCNone");
 }
+
+static DEVICE_ATTR_RO(cc_orient);
+
+/*TN begin modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
+static ssize_t cc_role_read(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int value = 0;
+	value = cc_role;
+	pr_info("%s enter\n", __FUNCTION__);
+	return sprintf(buf, "%d\n", value);
+}
+
+static ssize_t cc_role_write(struct device *dev, struct device_attribute *attr, const char *buf, size_t len)
+{
+
+	pr_info("%s enter\n", __FUNCTION__);
+
+	if (buf[0] == '0') {
+		pr_info("%s write cc_role low\n", __FUNCTION__);
+		cc_role = 0;
+		usb_role_switch_set_role(g_extcon->role_sw, g_extcon->c_role);
+	} else if (buf[0] == '1') {
+		pr_info("%s write cc_role high\n", __FUNCTION__);
+		cc_role = 1;
+		usb_role_switch_set_role(g_extcon->role_sw, USB_ROLE_HOST);
+	} else {
+		pr_info("%s buf is other number ! ! !\n", __FUNCTION__);
+	}
+	return 1;
+}
+static DEVICE_ATTR(cc_role, 0644, cc_role_read, cc_role_write);
+
+
+static struct attribute *typec_attrs[] = {
+	&dev_attr_cc_orient.attr,
+	&dev_attr_cc_role.attr,
+	NULL,
+};
+/*TN End modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
+
+static struct attribute_group typec_group = {
+	.attrs = typec_attrs,
+};
+
+static int extcon_create_typec_sysfs(struct device *dev)
+{
+	int ret = 0;
+
+	ret = sysfs_create_group(&dev->kobj, &typec_group);
+	if (ret) {
+		dev_info(dev, "typec cc_orient node create fail \n");
+		sysfs_remove_group(&dev->kobj, &typec_group);
+	}
+	return ret;
+}
+/*TN End modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
 
 static void mtk_usb_extcon_update_role(struct work_struct *work)
 {
@@ -64,7 +123,6 @@ static void mtk_usb_extcon_update_role(struct work_struct *work)
 
 	cur_dr = extcon->c_role;
 	new_dr = role->d_role;
-
 	dev_info(extcon->dev, "cur_dr(%d) new_dr(%d)\n", cur_dr, new_dr);
 
 	/* none -> device */
@@ -95,10 +153,16 @@ static void mtk_usb_extcon_update_role(struct work_struct *work)
 		extcon_set_state_sync(extcon->edev, EXTCON_USB, true);
 	}
 
+/*TN Begin modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
 	/* usb role switch */
-	if (extcon->role_sw)
-		usb_role_switch_set_role(extcon->role_sw, new_dr);
-
+	if (extcon->role_sw) {
+		if (cc_role) {
+			usb_role_switch_set_role(extcon->role_sw, USB_ROLE_HOST);
+		} else {
+			usb_role_switch_set_role(extcon->role_sw, new_dr);
+		}
+	}
+/*TN End modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
 	extcon->c_role = new_dr;
 	kfree(role);
 }
@@ -159,15 +223,19 @@ static void mtk_usb_extcon_psy_detector(struct work_struct *work)
 
 	/* Workaround for PR_SWAP, IF tcpc_dev, then do not switch role. */
 	/* Since we will set USB to none when type-c plug out */
+#if IS_ENABLED(CONFIG_TCPC_CLASS)
 	if (extcon->tcpc_dev) {
 		if (usb_is_online(extcon) && extcon->c_role == USB_ROLE_NONE)
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_DEVICE);
 	} else {
+#endif
 		if (usb_is_online(extcon))
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_DEVICE);
 		else
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_NONE);
+#if IS_ENABLED(CONFIG_TCPC_CLASS)
 	}
+#endif
 
 }
 
@@ -190,17 +258,21 @@ static int mtk_usb_extcon_psy_init(struct mtk_extcon_info *extcon)
 {
 	int ret = 0;
 	struct device *dev = extcon->dev;
-	#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	extcon->usb_psy = power_supply_get_by_name("sgm4154x-charger");
-	#else
+
+/*TN Begin modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
+#if IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SC89890H) || IS_ENABLED(CONFIG_OEM_SWITCH_CHARGER_SGM41542)
+	extcon->usb_psy = power_supply_get_by_name("ext_charger_type");
+	if (IS_ERR_OR_NULL(extcon->usb_psy)) {
+		dev_err(dev, "fail to get ext_charger_type psy\n");
+	}
+#else
 	extcon->usb_psy = devm_power_supply_get_by_phandle(dev, "charger");
-	#endif
+#endif
+/*TN End modified by hao.jia/809321 2023814 CR/EKFOGO4G-1483*/
 	if (IS_ERR_OR_NULL(extcon->usb_psy)) {
 		dev_err(dev, "fail to get usb_psy\n");
 		return -EINVAL;
 	}
-
-	dev_err(dev, "%s charger psy name: %s\n", __func__, extcon->usb_psy->desc->name);
 
 	INIT_DELAYED_WORK(&extcon->wq_psy, mtk_usb_extcon_psy_detector);
 
@@ -217,12 +289,102 @@ static int mtk_usb_extcon_psy_init(struct mtk_extcon_info *extcon)
 	return ret;
 }
 
+//#if IS_ENABLED(CONFIG_CHARGER_RT9458)
+#if 1
+/* ADAPT_CHARGER_V1 */
+#include <charger_class.h>
+static struct charger_device *primary_charger;
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+#include <dev_info.h>
+static struct charger_device *primary_dvchg;
+#endif
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+static int mtk_usb_extcon_set_vbus_v1(struct mtk_extcon_info *extcon, bool is_on)
+{
+	struct device *dev = extcon->dev;
+
+	if (!primary_charger) {
+		primary_charger = get_charger_by_name("primary_chg");
+		if (!primary_charger) {
+			dev_info(dev, "%s : get primary charger device failed\n", __func__);
+			return -ENODEV;
+		}
+	}
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+	if (!oem_pcba_chg_15w_exist()) {
+		if (!primary_dvchg) {
+			primary_dvchg = get_charger_by_name("primary_dvchg");
+			if (!primary_dvchg) {
+				dev_err(dev, "%s :found 33W device failed\n", __func__);
+				return -ENODEV;
+			}
+		}
+	}
+#endif
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_MTK_GAUGE_VERSION) && (CONFIG_MTK_GAUGE_VERSION == 30)
+	dev_info(dev, "%s vbus turn %s\n", __func__, is_on ? "on" : "off");
+	if (is_on) {
+		charger_dev_enable_otg(primary_charger, true);
+		charger_dev_set_boost_current_limit(primary_charger,
+			1500000);
+		#if 0
+		{// # workaround
+			charger_dev_kick_wdt(primary_charger);
+			enable_boost_polling(true);
+		}
+		#endif
+	} else {
+		charger_dev_enable_otg(primary_charger, false);
+		#if 0
+			//# workaround
+			enable_boost_polling(false);
+		#endif
+	}
+#else
+	if (is_on) {
+		charger_dev_enable_otg(primary_charger, true);
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+		if (!oem_pcba_chg_15w_exist()) {
+			dev_err(dev, "%s : enable otg on charger pump\n", __func__);
+			charger_dev_enable_otg(primary_dvchg, true);
+			charger_dev_enable_acdrv1(primary_dvchg, true);
+		}
+#endif
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+/*TN Begin modified by zelin.pan/860620 20231102 CR/EKFOGO4G-1548*/
+		charger_dev_set_boost_current_limit(primary_charger,
+			1200000);
+	} else {
+/*TN End modified by zelin.pan/860620 20231102 CR/EKFOGO4G-1548*/
+		charger_dev_enable_otg(primary_charger, false);
+/*TN Begin modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+#if IS_ENABLED(CONFIG_OEM_TURBO_CHARGER)
+		if (!oem_pcba_chg_15w_exist()) {
+			dev_err(dev, "%s : disable otg on charger pump\n", __func__);
+			charger_dev_enable_otg(primary_dvchg, false);
+		}
+#endif
+/*TN End modified by xuan.wang/860655 20231031CR/EKFOGO4G-1548*/
+	}
+#endif
+		return 0;
+}
+#endif
+
 static int mtk_usb_extcon_set_vbus(struct mtk_extcon_info *extcon,
 							bool is_on)
 {
+	int ret;
+//#if IS_ENABLED(CONFIG_CHARGER_RT9458)
+#if 1
+	ret = mtk_usb_extcon_set_vbus_v1(extcon, is_on);
+#else
 	struct regulator *vbus = extcon->vbus;
 	struct device *dev = extcon->dev;
-	int ret;
 
 	/* vbus is optional */
 	if (!vbus || extcon->vbus_on == is_on)
@@ -231,7 +393,6 @@ static int mtk_usb_extcon_set_vbus(struct mtk_extcon_info *extcon,
 	dev_info(dev, "vbus turn %s\n", is_on ? "on" : "off");
 
 	if (is_on) {
-		mmi_mux_typec_otg_chan(MMI_MUX_CHANNEL_TYPEC_OTG, true);
 		if (extcon->vbus_vol) {
 			ret = regulator_set_voltage(vbus,
 					extcon->vbus_vol, extcon->vbus_vol);
@@ -257,12 +418,13 @@ static int mtk_usb_extcon_set_vbus(struct mtk_extcon_info *extcon,
 		}
 	} else {
 		regulator_disable(vbus);
-		mmi_mux_typec_otg_chan(MMI_MUX_CHANNEL_TYPEC_OTG, false);
 	}
 
 	extcon->vbus_on = is_on;
 
-	return 0;
+	ret = 0;
+#endif
+	return ret;
 }
 
 #if IS_ENABLED(CONFIG_TCPC_CLASS)
@@ -300,7 +462,6 @@ static int mtk_extcon_tcpc_notifier(struct notifier_block *nb,
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_DEVICE);
 		} else if ((noti->typec_state.old_state == TYPEC_ATTACHED_SRC ||
 			noti->typec_state.old_state == TYPEC_ATTACHED_SNK ||
-			noti->typec_state.old_state == TYPEC_ATTACHED_AUDIO ||
 			noti->typec_state.old_state == TYPEC_ATTACHED_NORP_SRC ||
 			noti->typec_state.old_state == TYPEC_ATTACHED_CUSTOM_SRC ||
 			noti->typec_state.old_state == TYPEC_ATTACHED_DBGACC_SNK) &&
@@ -308,6 +469,9 @@ static int mtk_extcon_tcpc_notifier(struct notifier_block *nb,
 			dev_info(dev, "Type-C plug out\n");
 			mtk_usb_extcon_set_role(extcon, USB_ROLE_NONE);
 		}
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
+		typec_polarity = noti->typec_state.polarity;
+/*TN End modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
 		break;
 	case TCP_NOTIFY_DR_SWAP:
 		dev_info(dev, "%s dr_swap, new role=%d\n",
@@ -361,7 +525,6 @@ static int mtk_usb_extcon_tcpc_init(struct mtk_extcon_info *extcon)
 }
 #endif
 
-#ifdef MTK_BASE
 static void mtk_usb_extcon_detect_cable(struct work_struct *work)
 {
 	struct mtk_extcon_info *extcon = container_of(to_delayed_work(work),
@@ -433,7 +596,6 @@ static int mtk_usb_extcon_id_pin_init(struct mtk_extcon_info *extcon)
 
 	return 0;
 }
-#endif
 
 #if IS_ENABLED(CONFIG_TCPC_CLASS)
 #define PROC_FILE_SMT "mtk_typec"
@@ -499,7 +661,9 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mtk_extcon_info *extcon;
+#if IS_ENABLED(CONFIG_TCPC_CLASS)
 	const char *tcpc_name;
+#endif
 	int ret;
 
 	extcon = devm_kzalloc(&pdev->dev, sizeof(*extcon), GFP_KERNEL);
@@ -533,11 +697,7 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
 		extcon->c_role = USB_ROLE_NONE;
 
 	/* vbus */
-	#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	extcon->vbus = devm_regulator_get(dev, "usb-otg-vbus");
-	#else
 	extcon->vbus = devm_regulator_get(dev, "vbus");
-	#endif
 	if (IS_ERR(extcon->vbus)) {
 		dev_err(dev, "failed to get vbus\n");
 		return PTR_ERR(extcon->vbus);
@@ -565,7 +725,7 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
 	ret = of_property_read_string(dev->of_node, "tcpc", &tcpc_name);
 	if (of_property_read_bool(dev->of_node, "mediatek,u2") && ret == 0
 		&& strcmp(tcpc_name, "type_c_port0") == 0) {
-		dev_info(dev, "create %d dir\n", PROC_FILE_SMT);
+		dev_info(dev, "create %s dir\n", PROC_FILE_SMT);
 		mtk_usb_extcon_procfs_init(extcon);
 	}
 #endif
@@ -573,12 +733,12 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
 	extcon->extcon_wq = create_singlethread_workqueue("extcon_usb");
 	if (!extcon->extcon_wq)
 		return -ENOMEM;
-#ifdef MTK_BASE
+
 	/* get id resources */
 	ret = mtk_usb_extcon_id_pin_init(extcon);
 	if (ret < 0)
 		dev_info(dev, "failed to init id pin\n");
-#endif
+
 	/* power psy */
 	ret = mtk_usb_extcon_psy_init(extcon);
 	if (ret < 0)
@@ -589,8 +749,14 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
 	ret = mtk_usb_extcon_tcpc_init(extcon);
 	if (ret < 0)
 		dev_err(dev, "failed to init tcpc\n");
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
+	extcon_create_typec_sysfs(extcon->dev);
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
 #endif
 
+/*TN Begin modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
+	g_extcon = extcon;
+/*TN End modified by zelin.pan/860620 20240104 CR/EKFOGO4G-1562*/
 	platform_set_drvdata(pdev, extcon);
 
 	return 0;
@@ -598,7 +764,13 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
 
 static int mtk_usb_extcon_remove(struct platform_device *pdev)
 {
+/*TN Begin modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
+	struct device *dev = &pdev->dev;
+	if (dev != NULL) {
+		sysfs_remove_group(&dev->kobj, &typec_group);
+	}
 	return 0;
+/*TN End modified by zelin.pan/860620 20230823 CR/EKFOGO4G-1562*/
 }
 
 static void mtk_usb_extcon_shutdown(struct platform_device *pdev)

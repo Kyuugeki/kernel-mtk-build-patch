@@ -480,8 +480,10 @@ static int reg_to_current(struct mtk_gauge *gauge, unsigned int regval)
 		regval, uvalue16, dvalue, (int)temp_value,
 		retval, is_charging);
 
-	if (is_charging == false)
+	if (is_charging == false) {
+		bm_err("[%s], is_charging=%d\n", __func__, is_charging);
 		return -retval;
+	}
 
 	return retval;
 }
@@ -983,9 +985,9 @@ int nafg_check_corner(struct mtk_gauge *gauge)
 	get_c_dltv_mv = reg_to_mv_value(nag_c_dltv_reg_value);
 
 	nag_vbat = get_nafg_vbat(gauge);
-	if (nag_vbat < 31500 && nag_zcv > 31500)
+	if (nag_vbat < 27000 && nag_zcv > 27000)
 		gauge->nafg_corner = 1;
-	else if (nag_zcv < 31500 && nag_vbat > 31500)
+	else if (nag_zcv < 27000 && nag_vbat > 27000)
 		gauge->nafg_corner = 2;
 	else
 		gauge->nafg_corner = 0;
@@ -2842,9 +2844,9 @@ static int rtc_ui_soc_get(struct mtk_gauge *gauge,
 	*val = rtc_ui_soc;
 
 	if (rtc_ui_soc > 100 || rtc_ui_soc < 0)
-		bm_err("[%s]ERR!rtc=0x%x,ui_soc=%d\n", rtc_value, rtc_ui_soc);
+		bm_err("[%s]ERR!rtc=0x%x,ui_soc=%d\n", __func__, rtc_value, rtc_ui_soc);
 	else
-		bm_debug("[%s]rtc=0x%x,ui_soc=%d\n", rtc_value, rtc_ui_soc);
+		bm_debug("[%s]rtc=0x%x,ui_soc=%d\n", __func__, rtc_value, rtc_ui_soc);
 
 	return 0;
 }
@@ -2941,24 +2943,7 @@ static int bat_vol_get(struct mtk_gauge *gauge,
 
 	return ret;
 }
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-static int charger_vol_get(struct mtk_gauge *gauge,
-	struct mtk_gauge_sysfs_field_info *attr, int *val)
-{
-	int ret;
 
-	if (!IS_ERR(gauge->chan_charger_vbus)) {
-		ret = iio_read_channel_processed(gauge->chan_charger_vbus, val);
-		if (ret < 0)
-			bm_err("[%s]read fail,ret=%d\n", __func__, ret);
-	} else {
-		bm_err("[%s]chan error\n", __func__);
-		ret = -EOPNOTSUPP;
-	}
-
-	return ret;
-}
-#endif
 static int battery_temperature_adc_get(struct mtk_gauge *gauge,
 	struct mtk_gauge_sysfs_field_info *attr, int *val)
 {
@@ -3482,7 +3467,7 @@ void dump_nag(struct mtk_gauge *gauge)
 		(INT_STATUS_NAG_C_DLTV_MASK << INT_STATUS_NAG_C_DLTV_SHIFT))
 		>> INT_STATUS_NAG_C_DLTV_SHIFT;
 
-	bm_err("nag %d %d %d %d %d %d %d %d %d\n",
+	bm_err("nag %d %d %d %d %d %d %d %d %d %d\n",
 		nag[0], nag[1], nag[2], nag[3], nag[4], nag[5],
 		nag[6], nag[7], nag[8], nag[9]);
 }
@@ -3556,10 +3541,6 @@ static struct mtk_gauge_sysfs_field_info mt6358_sysfs_field_tbl[] = {
 		GAUGE_PROP_HW_VERSION),
 	GAUGE_SYSFS_FIELD_RO(bat_vol_get,
 		GAUGE_PROP_BATTERY_VOLTAGE),
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	GAUGE_SYSFS_FIELD_RO(charger_vol_get,
-		GAUGE_PROP_CHARGER_VOLTAGE),
-#endif
 	GAUGE_SYSFS_FIELD_RO(battery_temperature_adc_get,
 		GAUGE_PROP_BATTERY_TEMPERATURE_ADC),
 	GAUGE_SYSFS_FIELD_RO(bif_voltage_get,
@@ -3762,8 +3743,11 @@ struct file *filp, unsigned int cmd, unsigned long arg)
 		return -ENOTTY;
 	}
 
-	if (sizeof(arg) != sizeof(adc_out_datas))
+	if (sizeof(arg) != sizeof(adc_out_datas)) {
+		bm_err("%s sizeof(arg)=%d sizeof(adc_out_data)=%d\n",
+			__func__, sizeof(arg), sizeof(adc_out_datas));
 		return -EFAULT;
+	}
 
 	switch (cmd) {
 	case Get_META_BAT_VOL:
@@ -3824,6 +3808,7 @@ static long adc_cali_ioctl(
 			gauge_get_int_property(GAUGE_PROP_BATTERY_VOLTAGE);
 		if (copy_to_user(user_data_addr, adc_out_data,
 			sizeof(adc_out_data))) {
+			bm_err("%s copy META_BAT_VOL to user fail\n", __func__);
 			mutex_unlock(&gm->gauge->fg_mutex);
 			return -EFAULT;
 		}
@@ -3835,6 +3820,7 @@ static long adc_cali_ioctl(
 
 		if (copy_to_user(user_data_addr, adc_out_data,
 			sizeof(adc_out_data))) {
+			bm_err("%s copy META_BAT_SOC to user fail\n", __func__);
 			mutex_unlock(&gm->gauge->fg_mutex);
 			return -EFAULT;
 		}
@@ -3848,6 +3834,7 @@ static long adc_cali_ioctl(
 
 		if (copy_to_user(user_data_addr, adc_out_data,
 			sizeof(adc_out_data))) {
+			bm_err("%s copy META_BAT_CAR_TUNE_VALUE to user fail\n", __func__);
 			mutex_unlock(&gm->gauge->fg_mutex);
 			return -EFAULT;
 		}
@@ -3871,6 +3858,7 @@ static long adc_cali_ioctl(
 
 		if (copy_to_user(user_data_addr, adc_out_data,
 			sizeof(adc_out_data))) {
+			bm_err("%s copy Set_META_BAT_CAR_TUNE_VALUE to user fail\n", __func__);
 			mutex_unlock(&gm->gauge->fg_mutex);
 			return -EFAULT;
 		}
@@ -3930,8 +3918,6 @@ static int adc_cali_release(struct inode *inode, struct file *file)
 {
 	return 0;
 }
-
-
 
 static const struct file_operations adc_cali_fops = {
 	.owner = THIS_MODULE,
@@ -4077,14 +4063,7 @@ static int mt6358_gauge_probe(struct platform_device *pdev)
 		bm_err("chan_ptim_bat_voltage auxadc get fail, ret=%d\n",
 			ret);
 	}
-#ifdef CONFIG_MOTO_CHARGER_SGM415XX
-	gauge->chan_charger_vbus = devm_iio_channel_get(
-		&pdev->dev, "pmic_charger_vbus");
-	if (IS_ERR(gauge->chan_charger_vbus)) {
-		ret = PTR_ERR(gauge->chan_charger_vbus);
-		bm_err("chan_charger_vbus auxadc get fail, ret=%d\n", ret);
-	}
-#endif
+
 	gauge->chan_ptim_r = devm_iio_channel_get(
 		&pdev->dev, "pmic_ptim_r");
 	if (IS_ERR(gauge->chan_ptim_r)) {
@@ -4097,8 +4076,10 @@ static int mt6358_gauge_probe(struct platform_device *pdev)
 	gauge->hw_status.r_fg_value = 50;
 	gauge->attr = mt6358_sysfs_field_tbl;
 
-	if (battery_psy_init(pdev))
+	if (battery_psy_init(pdev)) {
+		bm_err("battery_psy_init fail\n");
 		return -ENOMEM;
+	}
 
 	gauge->psy_desc.name = "mtk-gauge";
 	gauge->psy_desc.type = POWER_SUPPLY_TYPE_UNKNOWN;
@@ -4114,7 +4095,9 @@ static int mt6358_gauge_probe(struct platform_device *pdev)
 	bat_create_netlink(pdev);
 	battery_init(pdev);
 	adc_cali_cdev_init(pdev);
-
+/*TN Begin modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2062*/
+	gauge->gm->bs_data.psd.external_power_changed(gauge->gm->bs_data.psy);
+/*TN End modified by zelin.pan/860620 20230913 CR/EKFOGO4G-2062*/
 	bm_err("%s: done\n", __func__);
 
 	return 0;

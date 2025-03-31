@@ -15,18 +15,31 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/workqueue.h>
-
+// TN Begin modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
+// TN End modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
 #define VIB_DEVICE "regulator_vibrator"
 
 #undef pr_fmt
 #define pr_fmt(fmt) KBUILD_MODNAME " %s(%d) :" fmt, __func__, __LINE__
 
 #define DEFAULT_MIN_LIMIT 15
-
+// TN Begin modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
+static int slot_gpio = 0;
+// TN End modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+static unsigned long vib_duration = 0;
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
 struct reg_vibr_config {
 	unsigned int min_volt;
 	unsigned int max_volt;
 	struct regulator *reg;
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+	unsigned int short_volt;
+	unsigned int long_volt;
+	unsigned int short_duration;
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
 };
 
 struct reg_vibr {
@@ -39,12 +52,53 @@ struct reg_vibr {
 	struct reg_vibr_config vibr_conf;
 	struct notifier_block oc_handle;
 };
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+static ssize_t vibrator_duration_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lu\n", vib_duration);
+}
 
+static ssize_t vibrator_duration_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	unsigned long state = 0;
+	ssize_t ret;
+
+	ret = kstrtoul(buf, 10, &state);
+	if (ret)
+	{
+		return ret;
+	}
+
+	vib_duration = state;
+
+	return size;
+}
+static DEVICE_ATTR(vibrator_duration, 0664, vibrator_duration_show, vibrator_duration_store);
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+// TN Begin modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
+static ssize_t slot_state_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int value = 0;
+	value = gpio_get_value(slot_gpio);
+
+	return sprintf(buf, "%d\n", value);
+}
+static DEVICE_ATTR(slot_state, 0444, slot_state_show, NULL);
+// TN End modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
 static int mt_vibra_init_config(struct device *dev,
 		struct reg_vibr_config *vibr_conf)
 {
 	int ret;
+// TN Begin modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
+	struct device_node *np = dev->of_node;
 
+	slot_gpio = of_get_named_gpio(np, "slot_gpio", 0);
+	if (slot_gpio < 0) {
+		pr_notice("get slot_gpio failed\n");
+	}
+// TN End modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
 	vibr_conf->reg = devm_regulator_get(dev, "vib");
 	if (IS_ERR(vibr_conf->reg)) {
 		ret = PTR_ERR(vibr_conf->reg);
@@ -74,7 +128,31 @@ static int mt_vibra_init_config(struct device *dev,
 		ret = -EINVAL;
 		return ret;
 	}
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+	ret = of_property_read_u32(dev->of_node, "short-volt",
+		&vibr_conf->short_volt);
+	if (ret) {
+		pr_notice("Error load dts: get short-volt failed!\n");
+		ret = -EINVAL;
+		return ret;
+	}
 
+	ret = of_property_read_u32(dev->of_node, "long-volt",
+		&vibr_conf->long_volt);
+	if (ret) {
+		pr_notice("Error load dts: get long-volt failed!\n");
+		ret = -EINVAL;
+		return ret;
+	}
+
+	ret = of_property_read_u32(dev->of_node, "short-duration",
+		&vibr_conf->short_duration);
+	if (ret) {
+		pr_notice("Error load dts: get short-duration failed!\n");
+		ret = -EINVAL;
+		return ret;
+	}
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
 	pr_info("vibr_conf %u-%u\n",
 		vibr_conf->min_volt, vibr_conf->max_volt);
 
@@ -94,9 +172,44 @@ static int vibr_power_set(struct reg_vibr *vibr)
 
 	return ret;
 }
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+static int set_vib_volt(struct reg_vibr *vibr, unsigned long duration)
+{
+	int ret = 0;
 
+	if(duration > vibr->vibr_conf.short_duration)
+	{
+		pr_info("set long_volt voltage = %u-%u\n",
+			vibr->vibr_conf.long_volt, vibr->vibr_conf.long_volt);
+		ret = regulator_set_voltage(vibr->vibr_conf.reg,
+			vibr->vibr_conf.long_volt, vibr->vibr_conf.long_volt);
+	}
+	else
+	{
+		pr_info("set short_volt voltage = %u-%u\n",
+			vibr->vibr_conf.short_volt, vibr->vibr_conf.short_volt);
+		ret = regulator_set_voltage(vibr->vibr_conf.reg,
+			vibr->vibr_conf.short_volt, vibr->vibr_conf.short_volt);
+	}
+
+	return ret;
+}
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
 static void vibr_enable(struct reg_vibr *vibr)
 {
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+	int ret = 0;
+	int volt = 0;
+
+	pr_info("vibr enable vib_duration %lu\n", vib_duration);
+	ret = set_vib_volt(vibr, vib_duration);
+	if(ret < 0)
+	{
+		pr_err("vibr_enable set voltage fail, ret = %d\n", ret);
+	}
+	volt = regulator_get_voltage(vibr->vibr_conf.reg);
+	pr_info("vibr enable volt %d\n", volt);
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
 	pr_info("vibr enable\n");
 
 	if (!atomic_read(&vibr->reg_status)) {
@@ -180,6 +293,12 @@ static int vib_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err;
 	}
+// TN Begin modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+	device_create_file(&pdev->dev, &dev_attr_vibrator_duration);
+// TN End modified by qinghua.zeng/860624 20230812 CR/EKFOGO4G-1287
+// TN Begin modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
+	device_create_file(&pdev->dev, &dev_attr_slot_state);
+// TN End modified by qinghua.zeng/860624 20231030 CR/EKFOGO4G-6000
 	m_vibr->vibr_queue = create_singlethread_workqueue(VIB_DEVICE);
 	if (!m_vibr->vibr_queue) {
 		ret = -ENOMEM;

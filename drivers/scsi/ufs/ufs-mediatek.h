@@ -23,10 +23,6 @@ enum {
 #define ufshcd_eh_in_progress(h) \
 	((h)->eh_flags & UFSHCD_EH_IN_PROGRESS)
 
-#if defined(CONFIG_SCSI_SKHID)
-#include "ufs-manual-gc.h"
-#endif
-
 /*
  * Vendor specific UFSHCI Registers
  */
@@ -76,15 +72,6 @@ enum {
 #define VS_DEBUGCLOCKENABLE         0xD0A1
 #define VS_SAVEPOWERCONTROL         0xD0A6
 #define VS_UNIPROPOWERDOWNCONTROL   0xD0A8
-
-#if defined(CONFIG_UFSFEATURE)
-extern unsigned int ram_size;
-extern char storage_mfrid[32];
-#define IS_SAMSUNG_DEVICE(mfrid)   (0 == strcmp(mfrid,"SAMSUNG"))
-#define IS_SKHYNIX_DEVICE(mfrid)   (0 == strcmp(mfrid,"SKHYNIX"))
-#define IS_MICRON_DEVICE(mfrid)   (0 == strcmp(mfrid,"MICRON"))
-#define IS_RAM_SIZE_GREATER_THAN_4G(ram_size) (ram_size > 4)
-#endif
 
 /*
  * Vendor specific link state
@@ -246,14 +233,11 @@ struct ufs_mtk_host {
 	bool boot_device;
 	struct ufs_vreg *vcc;
 
+	struct completion luns_added;
+
 	struct semaphore rpmb_sem;
 #if defined(CONFIG_UFSFEATURE)
 	struct ufsf_feature ufsf;
-#endif
-#if defined(CONFIG_SCSI_SKHID)
-	struct work_struct update_sysfs_work;
-	/* manual_gc */
-	struct ufs_manual_gc manual_gc;
 #endif
 };
 

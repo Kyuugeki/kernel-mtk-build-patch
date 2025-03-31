@@ -267,12 +267,14 @@ extern struct ccci_ccb_config ccb_configs[];
 
 #define CCCI_IOC_CCB_CTRL_INFO			\
 	_IOWR(CCCI_IOC_MAGIC, 71, struct ccb_ctrl_info)
+/* for cancel ccb poll */
+#define CCCI_IOC_SMEM_POLL_EXIT	\
+	_IO(CCCI_IOC_MAGIC, 76)
 
 #define CCCI_IOC_SET_HEADER			\
 	_IO(CCCI_IOC_MAGIC,  112) /* emcs_va */
 #define CCCI_IOC_CLR_HEADER			\
 	_IO(CCCI_IOC_MAGIC,  113) /* emcs_va */
-
 /* mdlogger */
 #define CCCI_IOC_DL_TRAFFIC_CONTROL		\
 	_IOW(CCCI_IOC_MAGIC, 119, unsigned int)
@@ -484,8 +486,6 @@ enum CCCI_CH {
 	CCCI_TCHE_TX			= 182,
 	CCCI_DISP_RX			= 183,
 	CCCI_DISP_TX			= 184,
-        CCCI_CIQ_RX                     = 185,
-        CCCI_CIQ_TX                     = 186,
 	CCCI_WIFI_RX			= 187,
 	CCCI_WIFI_TX			= 188,
 	CCCI_VTS_RX			= 189,
@@ -621,11 +621,5 @@ enum md_bc_event {
 /* ========================================================================= */
 /* common API */
 /* ========================================================================= */
-
-#ifdef FEATURE_SCP_CCCI_SUPPORT
-extern void fsm_scp_init0(void);
-#endif
-#ifdef CCCI_KMODULE_ENABLE
 int ccci_init(void);
-#endif
 #endif	/* __CCCI_CORE_H__ */

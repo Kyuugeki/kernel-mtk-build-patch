@@ -44,10 +44,6 @@ static int ufs_abort_aee_count;
 #include "ufs-mediatek-trace.h"
 #undef CREATE_TRACE_POINTS
 
-#ifdef CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT
-#include "ufshcd-moto-crypto.h"
-#endif
-
 #define ufs_mtk_va09_pwr_ctrl(res, on) \
 	ufs_mtk_smc(UFS_MTK_SIP_VA09_PWR_CTRL, res, on)
 
@@ -72,38 +68,11 @@ static int ufs_abort_aee_count;
 #define ufshcd_eh_in_progress(h) \
 	((h)->eh_flags & UFSHCD_EH_IN_PROGRESS)
 
-#if defined(CONFIG_UFSFEATURE)
-struct mmi_storage_info {
-        char type[16];  /* UFS or eMMC */
-        char size[16];  /* size in GB */
-        char card_manufacturer[32];
-        char product_name[32];  /* model ID */
-        char firmware_version[32];
-};
-
-struct mmi_ddr_info{
-        unsigned int mr5;
-        unsigned int mr6;
-        unsigned int mr7;
-        unsigned int mr8;
-        unsigned int type;
-        unsigned int ramsize;
-};
-
-static int get_dram_info(struct ufs_hba *hba);
-static int get_storage_info(struct ufs_hba *hba);
-
-unsigned int ram_size;
-char storage_mfrid[32];
-#endif
-
 static struct ufs_dev_fix ufs_mtk_dev_fixups[] = {
 	UFS_FIX(UFS_ANY_VENDOR, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM | UFS_DEVICE_QUIRK_DELAY_AFTER_LPM),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, "H9HQ21AFAMZDAR",
 		UFS_DEVICE_QUIRK_SUPPORT_EXTENDED_FEATURES),
-	UFS_FIX(UFS_VENDOR_SKHYNIX, "H9HQ15AFAMBDAR",
-		UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM | UFS_DEVICE_QUIRK_DELAY_AFTER_LPM),
 	END_FIX
 };
 
@@ -243,6 +212,14 @@ static int ufs_mtk_hce_enable_notify(struct ufs_hba *hba,
 	if (status == PRE_CHANGE) {
 		if (host->unipro_lpm) {
 			hba->vps->hba_enable_delay_us = 0;
+			/*
+			 * UFS may need recovery in suspned error state.
+			 * Force host reset or recovery may fail.
+			 */
+			if (hba->ufshcd_state != UFSHCD_STATE_OPERATIONAL) {
+				hba->vps->hba_enable_delay_us = 600;
+				ufs_mtk_host_reset(hba);
+			}
 		} else {
 			hba->vps->hba_enable_delay_us = 600;
 			ufs_mtk_host_reset(hba);
@@ -769,7 +746,6 @@ static bool ufs_mtk_is_data_cmd(struct scsi_cmnd *cmd)
 }
 
 #define UFS_VEND_SAMSUNG  (1 << 0)
-#define UFS_VEND_MICRON   (1 << 1)
 
 struct tracepoints_table {
 	const char *name;
@@ -856,7 +832,7 @@ static void ufs_mtk_trace_vh_update_sdev_vend_ss(void *data, struct scsi_device 
 	struct ufs_hba *hba = shost_priv(sdev->host);
 	struct ufsf_feature *ufsf = ufs_mtk_get_ufsf(hba);
 
-	if ((hba->dev_info.wmanufacturerid == UFS_VENDOR_SAMSUNG) || (hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON))
+	if (hba->dev_info.wmanufacturerid == UFS_VENDOR_SAMSUNG)
 		ufsf_slave_configure(ufsf, sdev);
 }
 
@@ -917,6 +893,21 @@ static void ufs_mtk_trace_vh_compl_command(void *data, struct ufs_hba *hba, stru
 #endif
 }
 
+static void ufs_mtk_trace_vh_update_sdev(void *data, struct scsi_device *sdev)
+{
+	struct ufs_hba *hba = shost_priv(sdev->host);
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+
+	dev_info(hba->dev, "lu %d slave configured", sdev->lun);
+
+	if (ufshcd_scsi_to_upiu_lun(sdev->lun) == UFS_UPIU_BOOT_WLUN) {
+		/* The last LUs */
+		dev_info(hba->dev, "LUNs ready");
+		complete(&host->luns_added);
+	}
+
+}
+
 static struct tracepoints_table interests[] = {
 	{
 		.name = "android_vh_ufs_send_command",
@@ -925,6 +916,10 @@ static struct tracepoints_table interests[] = {
 	{
 		.name = "android_vh_ufs_compl_command",
 		.func = ufs_mtk_trace_vh_compl_command
+	},
+	{
+		.name = "android_vh_ufs_update_sdev",
+		.func = ufs_mtk_trace_vh_update_sdev
 	},
 #if defined(CONFIG_UFSFEATURE)
 	{
@@ -940,7 +935,7 @@ static struct tracepoints_table interests[] = {
 	{
 		.name = "android_vh_ufs_update_sdev",
 		.func = ufs_mtk_trace_vh_update_sdev_vend_ss,
-		.vend = UFS_VEND_SAMSUNG | UFS_VEND_MICRON
+		.vend = UFS_VEND_SAMSUNG
 	},
 	{
 		.name = "android_vh_ufs_send_command",
@@ -994,8 +989,8 @@ static int ufs_mtk_install_tracepoints(struct ufs_hba *hba)
 		}
 
 		vend = interests[i].vend;
-		if ((vend & UFS_VEND_SAMSUNG) || (vend & UFS_VEND_MICRON)) {
-			if ((hba->dev_info.wmanufacturerid != UFS_VENDOR_SAMSUNG) && (hba->dev_info.wmanufacturerid != UFS_VENDOR_MICRON))
+		if (vend & UFS_VEND_SAMSUNG) {
+			if (hba->dev_info.wmanufacturerid != UFS_VENDOR_SAMSUNG)
 				continue;
 		}
 
@@ -1007,6 +1002,7 @@ static int ufs_mtk_install_tracepoints(struct ufs_hba *hba)
 
 	return 0;
 }
+
 
 static void ufs_mtk_get_controller_version(struct ufs_hba *hba)
 {
@@ -1200,22 +1196,16 @@ static void ufs_mtk_rpmb_add(void *data, async_cookie_t cookie)
 	u8 *desc_buf;
 	struct rpmb_dev *rdev;
 	u8 rw_size;
-	int retry = 10;
 	struct ufs_mtk_host *host;
 	struct ufs_hba *hba = (struct ufs_hba *)data;
 
 	host = ufshcd_get_variant(hba);
 
 	/* wait ufshcd_scsi_add_wlus add sdev_rpmb  */
-	while (hba->sdev_rpmb == NULL) {
-		if (retry) {
-			retry--;
-			msleep(1000);
-		} else {
-			dev_err(hba->dev,
-				"scsi rpmb device cannot found\n");
-			goto out;
-		}
+	err = wait_for_completion_timeout(&host->luns_added, 10 * HZ);
+	if (err == 0) {
+		dev_warn(hba->dev, "%s: LUNs not ready before timeout. RPMB init failed");
+		goto out;
 	}
 
 	desc_buf = kmalloc(QUERY_DESC_MAX_SIZE, GFP_KERNEL);
@@ -1311,6 +1301,7 @@ ufs_mtk_query_ioctl(struct ufs_hba *hba, u8 lun, void __user *buffer)
 			__func__, err);
 		goto out_release_mem;
 	}
+
 
 #if defined(CONFIG_UFSFEATURE)
 	if (ufsf_check_query(ioctl_data->opcode)) {
@@ -1683,29 +1674,6 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 	ufs_mtk_mphy_power_on(hba, true);
 	ufs_mtk_setup_clocks(hba, true, POST_CHANGE);
 
-#if defined(CONFIG_UFSFEATURE)
-	get_storage_info(hba);
-	get_dram_info(hba);
-#endif
-#if defined(CONFIG_SCSI_SKHID)
-	if (IS_SKHYNIX_DEVICE(storage_mfrid)) {
-		err = pixel_init(hba);
-		if (err)
-			return err;
-		pixel_init_manual_gc(hba);
-	}
-#endif
-
-	/* Instantiate Motorola crypto capabilities for wrapped keys.
-	 * It is controlled by CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT.
-	 * If this is not defined, this API would return zero and
-	 * non-wrapped crypto capabilities will be initialized.
-	 */
-#ifdef CONFIG_FSCRYPT_WRAPED_KEY_MODE_SUPPORT
-	hba->quirks |= UFSHCD_QUIRK_CUSTOM_KEYSLOT_MANAGER;
-	ufshcd_moto_hba_init_crypto_capabilities(hba);
-#endif
-
 	/* Get vcc-opt */
 	ufs_mtk_get_vcc_info(res);
 	if (res.a1 == VCC_1)
@@ -1724,6 +1692,8 @@ skip_vcc:
 	cpu_latency_qos_add_request(&host->pm_qos_req,
 	     	   PM_QOS_DEFAULT_VALUE);
 	host->pm_qos_init = true;
+
+	init_completion(&host->luns_added);
 
 	ufs_mtk_biolog_init(host->qos_allowed, host->boot_device);
 
@@ -2259,7 +2229,7 @@ static void ufs_mtk_fixup_dev_quirks(struct ufs_hba *hba)
 	ufs_mtk_install_tracepoints(hba);
 
 #if defined(CONFIG_UFSFEATURE)
-	if ((hba->dev_info.wmanufacturerid == UFS_VENDOR_SAMSUNG) || (hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON)) {
+	if (hba->dev_info.wmanufacturerid == UFS_VENDOR_SAMSUNG) {
 		host->ufsf.hba = hba;
 		ufsf_set_init_state(ufs_mtk_get_ufsf(hba));
 	}
@@ -2639,80 +2609,6 @@ static struct platform_driver ufs_mtk_pltform = {
 		.of_match_table = ufs_mtk_of_match,
 	},
 };
-
-#if defined(CONFIG_UFSFEATURE)
-static int get_storage_info(struct ufs_hba *hba)
-{
-    int ret = 0;
-    struct property *p;
-    struct device_node *n;
-    struct mmi_storage_info *info;
-
-    n = of_find_node_by_path("/chosen/mmi,storage");
-    if (n == NULL) {
-        ret = 1;
-        goto err;
-    }
-
-    info = kzalloc(sizeof(struct mmi_storage_info), GFP_KERNEL);
-    if (!info) {
-        dev_err(hba->dev,"%s: failed to allocate space for mmi_storage_info\n",
-           __func__);
-        ret = 1;
-        goto err;
-    }
-
-    for_each_property_of_node(n, p) {
-        if (!strcmp(p->name, "type") && p->value)
-            strlcpy(info->type, (char *)p->value, sizeof(info->type));
-        if (!strcmp(p->name, "size") && p->value)
-            strlcpy(info->size, (char *)p->value, sizeof(info->size));
-        if (!strcmp(p->name, "manufacturer") && p->value)
-            strlcpy(info->card_manufacturer, (char *)p->value, sizeof(info->card_manufacturer));
-        if (!strcmp(p->name, "product") && p->value)
-            strlcpy(info->product_name, (char *)p->value, sizeof(info->product_name));
-        if (!strcmp(p->name, "firmware") && p->value)
-            strlcpy(info->firmware_version, (char *)p->value, sizeof(info->firmware_version));
-    }
-
-    of_node_put(n);
-
-    dev_info(hba->dev, "manufacturer parsed from choosen is %s\n",info->card_manufacturer);
-    strncpy(storage_mfrid, info->card_manufacturer, sizeof(info->card_manufacturer));
-err:
-        return ret;
-}
-
-static int get_dram_info(struct ufs_hba *hba)
-{
-         int ret = -1;
-         struct device_node *n;
-         struct mmi_ddr_info *ddr_info;
-
-		ddr_info = kzalloc(sizeof(struct mmi_ddr_info), GFP_KERNEL);
-        if (!ddr_info) {
-                pr_err("%s: failed to allocate space for mmi_ddr_info\n", __func__);
-                goto err;
-        }
-
-        n = of_find_node_by_path("/chosen/mmi,ram");
-       if (n != NULL) {
-               of_property_read_u32(n, "mr5", &ddr_info->mr5);
-                of_property_read_u32(n, "mr6", &ddr_info->mr6);
-                of_property_read_u32(n, "mr7", &ddr_info->mr7);
-                of_property_read_u32(n, "mr8", &ddr_info->mr8);
-                of_property_read_u32(n, "type", &ddr_info->type);
-                of_property_read_u32(n, "ramsize", &ddr_info->ramsize);
-                of_node_put(n);
-        }
-
-        ram_size = (ddr_info->ramsize / 1024);
-        dev_info(hba->dev, "ram_size parsed from chosen is %d\n",ram_size);
-        return ram_size;
-err:
-        return ret;
-}
-#endif
 
 MODULE_AUTHOR("Stanley Chu <stanley.chu@mediatek.com>");
 MODULE_AUTHOR("Peter Wang <peter.wang@mediatek.com>");

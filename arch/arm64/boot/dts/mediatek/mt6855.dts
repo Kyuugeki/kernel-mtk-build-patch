@@ -378,6 +378,11 @@
 		#clock-cells = <1>;
 	};
 
+	mtk_ssc: mtk_ssc@1c01f000 {
+		compatible = "mediatek,ssc";
+		safe-vlogic-uv = <600000>;
+	};
+
 	camsys_main_clk: syscon@1a000000 {
 		compatible = "mediatek,mt6855-camsys_main", "syscon";
 		reg = <0 0x1a000000 0 0x1000>;
@@ -923,6 +928,13 @@
 		#size-cells = <2>;
 		ranges;
 
+		reserve-memory-vcp_share {
+			compatible = "mediatek,reserve-memory-vcp_share";
+			no-map;
+			size = <0 0x00201000>; /* 2MB */
+			alignment = <0 0x1000000>;
+			alloc-ranges = <0 0x50000000 0 0x40000000>;
+		};
 
 		ssmr_cma_mem: ssmr-reserved-cma_memory {
 			compatible = "shared-dma-pool";
@@ -941,14 +953,14 @@
 
 	memory_ssmr_features: memory-ssmr-features {
 		compatible = "mediatek,memory-ssmr-features";
-		svp-region-based-size = <0 0x2000000>;
+		svp-region-based-size = <0 0x4000000>;
 		svp-page-based-size = <0 0x19000000>;
-		tui-size = <0 0>;
-		wfd-region-based-size = <0 0>;
-		wfd-page-based-size = <0 0>;
-		prot-region-based-size = <0 0>;
+		tui-size = <0 0x4000000>;
+		wfd-region-based-size = <0 0x4000000>;
+		wfd-page-based-size = <0 0x4000000>;
+		prot-region-based-size = <0 0x10000000>;
 		prot-page-based-size = <0 0>;
-		sapu-data-shm-size = <0 0>;
+		sapu-data-shm-size = <0 0x2000000>;
 	};
 
 	ssmr {
@@ -1974,7 +1986,6 @@
 	/* Trustonic Mobicore SW IRQ number 156 = 32 + 124 */
 	mobicore: mobicore {
 		compatible = "trustonic,mobicore";
-		trustonic,real-drv = <1>;
 		interrupts = <GIC_SPI 124 IRQ_TYPE_EDGE_RISING 0>;
 	};
 
@@ -2027,7 +2038,7 @@
 		#mbox-cells = <1>;
 	};
 
-	soc: soc {
+	soc {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		compatible = "simple-bus";
@@ -4109,6 +4120,7 @@
 			<20 3  2 0>,/* IPI_IN_VCP_RAM_DUMP_1 */
 			<22 4  4 0>;/* IPI_IN_VCP_MPOOL_1 */
 
+			vcp_mem_key = "mediatek,reserve-memory-vcp_share";
 			vcp_mem_tbl = <0 0x78000>, /* VDEC_MEM_ID 480KB */
 				      <1 0x8000>, /* VENC_MEM_ID 32KB */
 				      <2 0x180000>, /* LOGGER 1MB 512KB*/
@@ -4518,7 +4530,7 @@
 			<1 0>,
 			<2 642>, /* use FHD60 worst case * 0.7: 256*458/766 * 1.5 * 4 * 0.7*/
 			<6 7>;
-			mediatek,uniq_dom = <1>;
+		mediatek,uniq_dom = <1>;
 		};
 
 		jpgenc@17030000 {
@@ -7061,20 +7073,7 @@
 				<&mipi_tx_config0>;
 			clock-names = "engine", "digital", "hs";
 		};
-	/* modify by wt.liangnengjie for swtp start */
-	swtp: swtp {
-		compatible = "mediatek, swtp-eint";
-	};
-	swtp_1: swtp_1 {
-		compatible = "mediatek, swtp1-eint";
-	};
-	swtp_2: swtp_2 {
-		compatible = "mediatek, swtp2-eint";
-	};
-	swtp_3: swtp_3 {
-		compatible = "mediatek, swtp3-eint";
-	};
-	/* modify by wt.liangnengjie for swtp end */
+
 		dsi_te: dsi_te {
 			compatible = "mediatek, dsi_te-eint";
 			status = "disabled";
@@ -7115,16 +7114,6 @@
 
 		flashlight_core: flashlight_core {
 			compatible = "mediatek,flashlight_core";
-		};
-
-		flashlights_aw36515: flashlights_aw36515{
-			compatible = "mediatek,flashlights_aw36515";
-			decouple = <0>;
-			channel@1 {
-			type = <0>;
-			ct = <0>;
-			part = <0>;
-			};
 		};
 
 		mtk_composite_v4l2_1: mtk_composite_v4l2_1 {
@@ -7427,7 +7416,7 @@
 
 		usb_boost: usb_boost_manager {
 			compatible = "mediatek,usb_boost";
-			interconnects = <&dvfsrc MT6873_MASTER_DBGIF &dvfsrc MT6873_SLAVE_DDR_EMI>;
+			interconnects = <&dvfsrc MT6873_MASTER_USB &dvfsrc MT6873_SLAVE_DDR_EMI>;
 			interconnect-names = "icc-bw";
 			required-opps = <&dvfsrc_freq_opp0>;
 		};
@@ -7462,7 +7451,7 @@
 		pd_charger_current = <500000>;
 
 		/* battery temperature protection */
-		temp_t4_threshold = <60>;
+		temp_t4_threshold = <50>;
 		temp_t3_threshold = <45>;
 		temp_t1_threshold = <0>;
 
@@ -7542,38 +7531,44 @@
 		dual_polling_ieoc = <450000>;
 		slave_mivr_diff = <100000>;
 		vbat_threshold = <4150>;
+
+		/* rcable */
+		enable-inductor-protect = <1>;
 	};
 
-	pe4: pe4 {
-		compatible = "mediatek,charger,pe4";
+	pe45: pe45 {
+		compatible = "mediatek,charger,pe45";
 		gauge = <&mtk_gauge>;
 
-		min_charger_voltage = <4600000>;
-		pe40_stop_battery_soc = <80>;
+		min-charger-voltage = <4600000>;
+		pe45-stop-battery-soc = <80>;
 
-		high_temp_to_leave_pe40 = <46>;
-		high_temp_to_enter_pe40 = <39>;
-		low_temp_to_leave_pe40 = <10>;
-		low_temp_to_enter_pe40 = <16>;
-		ibus_err = <14>;
+		high-temp-to-leave-pe45 = <46>;
+		high-temp-to-enter-pe45 = <39>;
+		low-temp-to-leave-pe45 = <10>;
+		low-temp-to-enter-pe45 = <16>;
+		ibus-err = <14>;
 
-		/* PE 4.0 cable impedance (mohm) */
-		pe40_r_cable_1a_lower = <500>;
-		pe40_r_cable_2a_lower = <351>;
-		pe40_r_cable_3a_lower = <240>;
+		/* PE 4.5 cable impedance (mohm) */
+		pe45-r-cable-1a-lower = <500>;
+		pe45-r-cable-2a-lower = <351>;
+		pe45-r-cable-3a-lower = <240>;
+		pe45-r-cable-level = <200 300 400 500 500>;
+		pe45-r-cable-voltage = <5000 5500 6000 6500 7000>;
+		pe45-r-cable-current-limit = <3000 3000 3000 2500 2200>;
 
 		/* single charger */
-		sc_input_current = <3200000>;
-		sc_charger_current = <3000000>;
+		sc-input-current = <3200000>;
+		sc-charger-current = <3000000>;
 
 		/* dual charger in series*/
-		dcs_input_current = <3200000>;
-		dcs_chg1_charger_current = <1500000>;
-		dcs_chg2_charger_current = <1500000>;
+		dcs-input-current = <3200000>;
+		dcs-chg1-charger-current = <1500000>;
+		dcs-chg2-charger-current = <1500000>;
 
-		dual_polling_ieoc = <450000>;
-		slave_mivr_diff = <100000>;
-		vbat_threshold = <4150>;
+		dual-polling-ieoc = <450000>;
+		slave-mivr-diff = <100000>;
+		vbat-threshold = <4150>;
 	};
 
 	pe5: pe5 {
@@ -7678,7 +7673,7 @@
 		charging_host_charger_current = <1500000>;
 
 		/* dynamic mivr */
-		/*enable_dynamic_mivr;*/
+		enable_dynamic_mivr;
 		min_charger_voltage_1 = <4400000>;
 		min_charger_voltage_2 = <4200000>;
 		max_dmivr_charger_current = <1800000>;
@@ -8345,7 +8340,7 @@ cpuqos_mode,dnth0,dnth1,upth0,upth1";
 	};
 };
 
-//#include "mediatek/cust_mt6855_camera.dtsi"
+#include "mediatek/cust_mt6855_camera.dtsi"
 #include "mediatek/cust_mt6855_msdc.dtsi"
 #include "mediatek/mt6855-clkitg.dtsi"
 #include "mediatek/rt5133.dtsi"
@@ -8809,5 +8804,3 @@ cpuqos_mode,dnth0,dnth1,upth0,upth1";
 #include "mediatek/mt6855-disable-unused.dtsi"
 #include "mediatek/bat_setting/mt6855_battery_prop.dtsi"
 #include "mediatek/trusty.dtsi"
-/* Motorola base dts override */
-#include "mediatek/mt6855-moto-base.dtsi"

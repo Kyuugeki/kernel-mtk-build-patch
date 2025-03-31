@@ -1,0 +1,28 @@
+/*[TN.NJDC] sensor overlay file.start*/
+#ifdef CONFIG_DVT_BUILD
+&i2c3 {
+#else
+&i2c5 {
+#endif
+    status = "okay";
+    awinic_sar@12 {
+        compatible = "awinic,aw_sar";
+        reg = <0x12>;
+        sar-num = < 0 >;
+        interrupt-parent = < &pio >;
+        interrupts = <19 0>;
+        irq-gpio = <&pio 19 0>;
+        channel_use_flag = <0xff>;
+        aw_sar,use_plug_cail;
+        aw_sar,update_fw;
+        status = "okay";
+    };
+};
+&odm {
+    ant_det: ant_det {
+		status = "okay";
+		compatible = "tinno,ant_det";
+		tinno,ant-det-gpio = <&pio 65 0>;
+	};
+};
+/*[TN.NJDC] sensor overlay file.end*/

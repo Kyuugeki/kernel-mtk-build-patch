@@ -33,7 +33,6 @@ static const char *const chg_alg_notify_evt_name[EVT_MAX] = {
 	[EVT_VBUSOVP_ALARM] = "EVT_VBUSOVP_ALARM",
 	[EVT_BATPRO_DONE] = "EVT_BATPRO_DONE",
 	[EVT_ALGO_STOP] = "EVT_ALGO_STOP",
-	[EVT_VDM_VERIFY] = "EVT_VDM_VERIFY",
 };
 
 static void chg_alg_device_release(struct device *dev)
@@ -149,6 +148,8 @@ char *chg_alg_state_to_str(int state)
 		return "ALG_TA_NOT_SUPPORT";
 	case ALG_NOT_READY:
 		return "ALG_NOT_READY";
+	case ALG_WAIVER:
+		return "ALG_WAIVER";
 	case ALG_READY:
 		return "ALG_READY";
 	case ALG_RUNNING:
@@ -311,7 +312,11 @@ static int __init charger_algorithm_class_init(void)
 	return 0;
 }
 
+#if IS_BUILTIN(CONFIG_MTK_CHARGER)
+subsys_initcall(charger_algorithm_class_init);
+#else
 module_init(charger_algorithm_class_init);
+#endif
 module_exit(charger_algorithm_class_exit);
 
 MODULE_DESCRIPTION("Charger Algorithm Class Device");

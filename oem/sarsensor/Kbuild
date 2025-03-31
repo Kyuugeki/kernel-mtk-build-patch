@@ -1,0 +1,6 @@
+ifdef CONFIG_OEM_AW9610X
+	obj-y += aw/
+endif
+ifdef CONFIG_OEM_ANT_DET
+	obj-y += ant_det/
+endif

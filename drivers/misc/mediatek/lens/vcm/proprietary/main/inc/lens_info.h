@@ -23,7 +23,6 @@
 #endif
 
 /* AFDRV_XXXX be the same as AF_DRVNAME in (*af).c */
-#define MOT_DEVONN_AFDRV_DW9800VAF "MOT_DEVONN_DW9800VAF"
 #define AFDRV_AD5820AF "AD5820AF"
 #define AFDRV_AD5823 "AD5823"
 #define AFDRV_AD5823AF "AD5823AF"
@@ -51,6 +50,7 @@
 #define AFDRV_GAF002AF "GAF002AF"
 #define AFDRV_GAF008AF "GAF008AF"
 #define AFDRV_GT9764AF "GT9764AF"
+#define AFDRV_GT9768AF "GT9768AF"
 #define AFDRV_LC898122AF "LC898122AF"
 #define AFDRV_LC898212AF "LC898212AF"
 #define AFDRV_LC898212XDAF "LC898212XDAF"
@@ -66,15 +66,6 @@
 #define AFDRV_OV8825AF "OV8825AF"
 #define AFDRV_WV511AAF "WV511AAF"
 #define AFDRV_DW9718TAF "DW9718TAF"
-//Begin: Add lens driver name for Vicky
-#define MOT_VICKY_AFDRV_GT9764 "MOT_VICKY_GT9764AF"
-//End
-//Begin: Add lens driver name for Devonf
-#define MOT_DEVONF_AFDRV_GT9764 "MOT_DEVONF_GT9764AF"
-//End
-//Begin: Add lens driver name for Cancunf
-#define MOT_CANCUNF_AFDRV_AW86006 "MOT_CANCUNF_AW86006AF"
-//End
 
 #define CONVERT_CCU_TIMESTAMP 0x1000
 
@@ -150,21 +141,8 @@ struct stAF_DrvList {
 	int (*pAF_Release)(struct inode *a_pstInode, struct file *a_pstFile);
 	int (*pAF_GetFileName)(unsigned char *pFileName);
 	int (*pAF_OisGetHallPos)(int *PosX, int *PosY);
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-	void (*pAF_ResetPos)(unsigned long Pos);
-#endif
+	unsigned long (*pAF_GetCurrentPos)(void);
 };
-
-#ifdef CONFIG_AF_NOISE_ELIMINATION
-#define AFIOC_T_SETOPENER _IOW(AF_MAGIC, 21, u32)
-#define AFIOC_T_SETCLOSEER _IOW(AF_MAGIC, 22, u32)
-#define AFIOC_T_SETVCMPOS _IOW(AF_MAGIC,23, u32)
-
-#define NO_HOLD 0b00
-#define CAM_HOLD 0b01
-#define VIB_HOLD 0b10
-#define ALL_HOLD 0b11
-#endif
 
 #define I2CBUF_MAXSIZE 10
 

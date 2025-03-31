@@ -204,9 +204,15 @@ static bool pd_vdm_state_transit(
 
 	if (vdm_cmdt == CMDT_INIT) {	/* Recv */
 		if (!vdm_is_state_transition_available(
+#if IS_ENABLED(CONFIG_OEM_TCPC_PD_SC2150A)
+			pd_port, true, state_transition)) {
+			PE_TRANSIT_STATE(pd_port, PE_UFP_VDM_SEND_NAK);
+			return true;
+		}
+#else
 			pd_port, true, state_transition))
 			return false;
-
+#endif /* CONFIG_OEM_TCPC_PD_SC2150A */
 		return pd_vdm_state_transit_rx(pd_port, state_transition);
 	}
 

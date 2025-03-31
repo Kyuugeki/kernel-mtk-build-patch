@@ -1,0 +1,6 @@
+ifdef CONFIG_OEM_CHARGER_LED
+	OEM_LED_OBJS += charger_led.o
+endif
+
+obj-$(CONFIG_OEM_CHARGER_LED) += oem_charger_led.o
+oem_charger_led-y := $(OEM_LED_OBJS)

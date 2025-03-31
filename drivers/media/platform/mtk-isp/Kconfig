@@ -75,10 +75,3 @@ config VIDEO_MTK_ISP_IPESYS
 	    which process the images to generate useful statistics
 	    for isp pipeline image computation such
 	    as motion estimation.
-
-config MTK_MEMORY_OPTIMIZE
-	tristate "Moto memory optimize"
-	help
-	    only video mode support vHDR, other mode don't need this vHDR
-	    buffer,the condition mtk_cam_feature_is_switchable_hdr is sufficient,
-	    so reduce unnecessary dynamic_exposure_num_max judgement.

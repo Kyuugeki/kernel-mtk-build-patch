@@ -26,12 +26,13 @@ ifeq ($(CONFIG_MTK_LENS_BU63165AF_SUPPORT), y)
 else
   subdir-ccflags-y += -I$(MTK_CUSTOM_PATH)/lens/vcm/proprietary/main/common/bu63169af/inc
 endif
-subdir-ccflags-y += -I$(MTK_CUSTOM_PATH)/lens/vcm/proprietary/main/common/mot_cancunf_aw86006af/MOT_CANCUNF_AW86006AF.c
 
 obj-$(CONFIG_MTK_LENS)    += mainaf.o
 
 mainaf-y  += main_lens.o
-mainaf-y  += common/mot_devonn_dw9800vaf/MOT_DEVONN_DW9800VAF.o
+ifeq ($(CONFIG_MTK_LENS), m)
+mainaf-y  += common/gt9764af/GT9764AF.o
+else
 mainaf-y  += common/fp5510e2af/FP5510E2AF.o
 mainaf-y  += common/bu6424af/BU6424AF.o
 mainaf-y  += common/bu6429af/BU6429AF.o
@@ -46,7 +47,7 @@ mainaf-y  += common/dw9718taf/DW9718TAF.o
 mainaf-y  += common/dw9719taf/DW9719TAF.o
 mainaf-y  += common/dw9763af/DW9763AF.o
 mainaf-y  += common/dw9839af/DW9839AF.o
-mainaf-y  += common/gt9764af/GT9764AF.o
+mainaf-y  += common/gt9768af/GT9768AF.o
 mainaf-y  += common/lc898212af/LC898212AF.o
 mainaf-y  += common/lc898212xdaf/LC898212XDAF.o
 mainaf-y  += common/lc898212xdaf/AfInter.o
@@ -68,7 +69,5 @@ mainaf-y  += common/bu63169af/OIS_func.o
 mainaf-y  += common/bu63169af/OIS_main.o
 mainaf-y  += common/bu63169af/OIS_user.o
 mainaf-y  += common/bu64253gwzaf/BU64253GWZAF.o
-mainaf-y  += common/mot_vicky_gt9764af/MOT_VICKY_GT9764AF.o
-mainaf-y  += common/mot_devonf_gt9764af/MOT_DEVONF_GT9764AF.o
-mainaf-y  += common/mot_cancunf_aw86006af/AF/MOT_CANCUNF_AW86006AF.o
-mainaf-y  += common/mot_cancunf_aw86006af/aw86006_ois.o
+endif
+

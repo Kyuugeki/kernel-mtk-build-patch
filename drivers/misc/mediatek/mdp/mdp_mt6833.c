@@ -1566,10 +1566,11 @@ static void mdp_enable_larb(bool enable, struct device *larb)
 #endif
 }
 
-static void cmdq_mdp_enable_common_clock(bool enable, u64 engine_flag)
+static s32 cmdq_mdp_enable_common_clock(bool enable, u64 engine_flag)
 {
 	if (engine_flag & MDP_ENG_LARB2)
 		mdp_enable_larb(enable, larb2);
+	return 0;
 }
 
 static void cmdq_mdp_check_hw_status(struct cmdqRecStruct *handle)
@@ -1961,6 +1962,11 @@ static s32 mdp_get_rdma_idx(u32 eng_base)
 	return rdma_idx;
 }
 
+static bool mdp_svp_support_meta_data(void)
+{
+	return true;
+}
+
 void cmdq_mdp_platform_function_setting(void)
 {
 	struct cmdqMDPFuncStruct *pFunc = cmdq_mdp_get_func();
@@ -2012,6 +2018,7 @@ void cmdq_mdp_platform_function_setting(void)
 	pFunc->getEngineGroupName = mdp_get_engine_group_name;
 	pFunc->mdpComposeReadback = cmdq_mdp_compose_readback;
 	pFunc->getRDMAIndex = mdp_get_rdma_idx;
+	pFunc->mdpSvpSupportMetaData = mdp_svp_support_meta_data;
 }
 MODULE_LICENSE("GPL");
 

@@ -64,7 +64,7 @@ struct rt_pd_manager_data {
 	struct usb_pd_identity partner_identity;
 };
 
-void __attribute__((weak)) usb_dpdm_pulldown(bool enable)
+void usb_dpdm_pulldown(bool enable)
 {
 	pr_notice("%s is not defined\n", __func__);
 }
@@ -366,10 +366,6 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 		state.mode = TCP_NOTIFY_AMA_DP_STATE;
 		state.data = noti;
 		typec_mux_set(rpmd->typec_port->mux, &state);
-		break;
-	case TCP_NOTIFY_PD_VDM_VERIFY:
-		dev_info(rpmd->dev, "%s mmi pd vdm verify state = %d\n",
-					__func__, noti->pd_state.vdm_verify);
 		break;
 	default:
 		break;

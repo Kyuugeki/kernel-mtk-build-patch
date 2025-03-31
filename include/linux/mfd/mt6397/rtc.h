@@ -26,7 +26,9 @@
 #define RTC_BBPU_CBUSY         BIT(6)
 #define RTC_BBPU_KEY           (0x43 << 8)
 
+#define RTC_WRTGR_MT6357       0x003a
 #define RTC_WRTGR_MT6358       0x003a
+#define RTC_WRTGR_MT6359P      0x003a
 #define RTC_WRTGR_MT6397       0x003c
 #define RTC_WRTGR_MT6323       RTC_WRTGR_MT6397
 
@@ -235,10 +237,11 @@ enum boot_mode_t {
 #endif
 
 struct mtk_rtc_data {
-	u32                     wrtgr;
-	const struct reg_field *spare_reg_fields;
+	u32			wrtgr;
+	u8			alarm_sta_clr_bit;
+	const struct reg_field	*spare_reg_fields;
 #ifdef SUPPORT_EOSC_CALI
-	const struct reg_field *cali_reg_fields;
+	const struct reg_field	*cali_reg_fields;
 	u32			eosc_cali_version;
 #endif
 };
@@ -251,6 +254,7 @@ struct mt6397_rtc {
 	struct regmap           *regmap;
 	int                     irq;
 	u32                     addr_base;
+	bool					skip_LPSD_solution;
 	const struct mtk_rtc_data *data;
 	struct regmap_field     *spare[SPARE_RG_MAX];
 #ifdef SUPPORT_EOSC_CALI
