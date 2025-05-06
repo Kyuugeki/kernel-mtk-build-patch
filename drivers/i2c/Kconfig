@@ -59,6 +59,11 @@ config I2C_CHARDEV
 	  This support is also available as a module.  If so, the module 
 	  will be called i2c-dev.
 
+config MOT_I2C_CONFLICT
+	bool "For MOT I2C CONFLICT for VCM/OIS/Sensor"
+	help
+	  MOT I2C CONFLICT for VCM/OIS/Sensor
+
 config I2C_MUX
 	tristate "I2C bus multiplexing support"
 	help

@@ -519,6 +519,24 @@ cleanup:
 	return status;
 }
 
+#if IS_ENABLED(CONFIG_MOT_I2C_CONFLICT)
+s32 i2c_lock_bus_helper(struct i2c_adapter *adap)
+{
+	int ret = 0;
+
+	if (i2c_in_atomic_xfer_mode()) {
+		WARN(!adap->algo->master_xfer_atomic && !adap->algo->smbus_xfer_atomic,
+		     "No atomic I2C transfer handler for '%s'\n", dev_name(&adap->dev));
+		ret = i2c_trylock_bus(adap, I2C_LOCK_SEGMENT) ? 0 : -EAGAIN;
+	} else {
+		i2c_lock_bus(adap, I2C_LOCK_SEGMENT);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(i2c_lock_bus_helper);
+#endif
+
 /**
  * i2c_smbus_xfer - execute SMBus protocol operations
  * @adapter: Handle to I2C bus
