@@ -133,7 +133,6 @@ struct mtk_cqdma_vchan {
  * @clk:                    The clock that device internal is using
  * @dma_requests:           The number of VCs the device supports to
  * @dma_channels:           The number of PCs the device supports to
- * @dma_mask:               A mask for DMA capability
  * @vc:                     The pointer to all available VCs
  * @pc:                     The pointer to all the underlying PCs
  */
@@ -143,7 +142,6 @@ struct mtk_cqdma_device {
 
 	u32 dma_requests;
 	u32 dma_channels;
-	u32 dma_mask;
 	struct mtk_cqdma_vchan *vc;
 	struct mtk_cqdma_pchan **pc;
 };
@@ -375,7 +373,7 @@ static void mtk_cqdma_tasklet_cb(struct tasklet_struct *t)
 
 		/*
 		 * free child CVD after completion.
-		 * the parent CVD would be freeed with desc_free by user.
+		 * the parent CVD would be freed with desc_free by user.
 		 */
 		if (cvd->parent != cvd)
 			kfree(cvd);
@@ -753,7 +751,6 @@ static int mtk_cqdma_probe(struct platform_device *pdev)
 	struct mtk_cqdma_device *cqdma;
 	struct mtk_cqdma_vchan *vc;
 	struct dma_device *dd;
-	struct resource *res;
 	int err;
 	u32 i;
 
@@ -806,17 +803,6 @@ static int mtk_cqdma_probe(struct platform_device *pdev)
 		cqdma->dma_channels = MTK_CQDMA_NR_PCHANS;
 	}
 
-	if (pdev->dev.of_node && of_property_read_u32(pdev->dev.of_node,
-						      "dma-channel-mask",
-						      &cqdma->dma_mask)) {
-		dev_info(&pdev->dev,
-			"Using 0 as missing dma-channel-mask property\n");
-	} else {
-		err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(cqdma->dma_mask));
-		if (err)
-			return err;
-	}
-
 	cqdma->pc = devm_kcalloc(&pdev->dev, cqdma->dma_channels,
 				 sizeof(*cqdma->pc), GFP_KERNEL);
 	if (!cqdma->pc)
@@ -837,13 +823,10 @@ static int mtk_cqdma_probe(struct platform_device *pdev)
 			return PTR_ERR(cqdma->pc[i]->base);
 
 		/* allocate IRQ resource */
-		res = platform_get_resource(pdev, IORESOURCE_IRQ, i);
-		if (!res) {
-			dev_err(&pdev->dev, "No irq resource for %s\n",
-				dev_name(&pdev->dev));
-			return -EINVAL;
-		}
-		cqdma->pc[i]->irq = res->start;
+		err = platform_get_irq(pdev, i);
+		if (err < 0)
+			return err;
+		cqdma->pc[i]->irq = err;
 
 		err = devm_request_irq(&pdev->dev, cqdma->pc[i]->irq,
 				       mtk_cqdma_irq, 0, dev_name(&pdev->dev),
@@ -910,12 +893,6 @@ static int mtk_cqdma_remove(struct platform_device *pdev)
 	unsigned long flags;
 	int i;
 
-	dma_async_device_unregister(&cqdma->ddev);
-	of_dma_controller_free(pdev->dev.of_node);
-
-	/* disable hardware */
-	mtk_cqdma_hw_deinit(cqdma);
-
 	/* kill VC task */
 	for (i = 0; i < cqdma->dma_requests; i++) {
 		vc = &cqdma->vc[i];
@@ -937,11 +914,11 @@ static int mtk_cqdma_remove(struct platform_device *pdev)
 		tasklet_kill(&cqdma->pc[i]->tasklet);
 	}
 
-	devm_kfree(&pdev->dev, cqdma->vc);
-	for (i = 0; i < cqdma->dma_channels; ++i)
-		devm_kfree(&pdev->dev, cqdma->pc[i]);
-	devm_kfree(&pdev->dev, cqdma->pc);
-	devm_kfree(&pdev->dev, cqdma);
+	/* disable hardware */
+	mtk_cqdma_hw_deinit(cqdma);
+
+	dma_async_device_unregister(&cqdma->ddev);
+	of_dma_controller_free(pdev->dev.of_node);
 
 	return 0;
 }

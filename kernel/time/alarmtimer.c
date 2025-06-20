@@ -2,13 +2,13 @@
 /*
  * Alarmtimer interface
  *
- * This interface provides a timer which is similarto hrtimers,
+ * This interface provides a timer which is similar to hrtimers,
  * but triggers a RTC alarm if the box is suspend.
  *
  * This interface is influenced by the Android RTC Alarm timer
  * interface.
  *
- * Copyright (C) 2010 IBM Corperation
+ * Copyright (C) 2010 IBM Corporation
  *
  * Author: John Stultz <john.stultz@linaro.org>
  */
@@ -35,8 +35,9 @@
 
 #if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
 #include <linux/sched/clock.h>
+#include <linux/sched.h>
+#define MAX_ALARM_CNT	10000ULL
 #endif
-
 
 /**
  * struct alarm_base - Alarm timer bases
@@ -97,7 +98,7 @@ static int alarmtimer_rtc_add_device(struct device *dev,
 	if (rtcdev)
 		return -EBUSY;
 
-	if (!rtc->ops->set_alarm)
+	if (!test_bit(RTC_FEATURE_ALARM, rtc->features))
 		return -1;
 	if (!device_may_wakeup(rtc->dev.parent))
 		return -1;
@@ -164,19 +165,9 @@ static inline void alarmtimer_rtc_timer_init(void) { }
  */
 static void alarmtimer_enqueue(struct alarm_base *base, struct alarm *alarm)
 {
-#ifdef CONFIG_ALARMTIMER_DEBUG
-	static DEFINE_RATELIMIT_STATE(ratelimit, HZ - 1, 5);
-#endif
-
 	if (alarm->state & ALARMTIMER_STATE_ENQUEUED)
 		timerqueue_del(&base->timerqueue, &alarm->node);
 
-#ifdef CONFIG_ALARMTIMER_DEBUG
-	if (__ratelimit(&ratelimit)) {
-		ratelimit.begin = jiffies;
-		pr_notice("%s, %lld\n", __func__, alarm->node.expires);
-	}
-#endif
 	timerqueue_add(&base->timerqueue, &alarm->node);
 	alarm->state |= ALARMTIMER_STATE_ENQUEUED;
 }
@@ -223,6 +214,7 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 #if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
 	start = sched_clock();
 #endif
+
 	spin_lock_irqsave(&base->lock, flags);
 	alarmtimer_dequeue(base, alarm);
 	spin_unlock_irqrestore(&base->lock, flags);
@@ -235,6 +227,7 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 
 	start = sched_clock();
 #endif
+
 	if (alarm->function)
 		restart = alarm->function(alarm, base->get_ktime());
 #if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
@@ -246,6 +239,7 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 
 	start = sched_clock();
 #endif
+
 	spin_lock_irqsave(&base->lock, flags);
 	if (restart != ALARMTIMER_NORESTART) {
 		hrtimer_set_expires(&alarm->timer, alarm->node.expires);
@@ -290,9 +284,6 @@ static int alarmtimer_suspend(struct device *dev)
 	struct rtc_device *rtc;
 	unsigned long flags;
 	struct rtc_time tm;
-#ifdef CONFIG_ALARMTIMER_DEBUG
-	struct rtc_time time;
-#endif
 
 	spin_lock_irqsave(&freezer_delta_lock, flags);
 	min = freezer_delta;
@@ -339,15 +330,7 @@ static int alarmtimer_suspend(struct device *dev)
 	rtc_read_time(rtc, &tm);
 	now = rtc_tm_to_ktime(tm);
 	now = ktime_add(now, min);
-#ifdef CONFIG_ALARMTIMER_DEBUG
-	time = rtc_ktime_to_tm(now);
-	pr_notice_ratelimited("%s convert %lld to %04d/%02d/%02d %02d:%02d:%02d (now = %04d/%02d/%02d %02d:%02d:%02d)\n",
-			__func__, expires,
-			time.tm_year+1900, time.tm_mon+1, time.tm_mday,
-			time.tm_hour, time.tm_min, time.tm_sec,
-			tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
-			tm.tm_hour, tm.tm_min, tm.tm_sec);
-#endif
+
 	/* Set alarm, if in the past reject suspend briefly to handle */
 	ret = rtc_timer_start(rtc, &rtctimer, now, 0);
 	if (ret < 0)
@@ -412,10 +395,58 @@ void alarm_start(struct alarm *alarm, ktime_t start)
 {
 	struct alarm_base *base = &alarm_bases[alarm->type];
 	unsigned long flags;
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	static unsigned long long duration_us;
+	static unsigned long long tfd_isalarm;
+	static int tfd_isalarm_cnt;
+	static int tfd_isalarm_comm_cnt;
+	static char comm[TASK_COMM_LEN];
+	static pid_t tfd_pid;
+#endif
 
 	spin_lock_irqsave(&base->lock, flags);
 	alarm->node.expires = start;
 	alarmtimer_enqueue(base, alarm);
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	/* warn_on when timeout is less than 50us */
+	duration_us = ktime_us_delta(alarm->node.expires, base->get_ktime());
+
+	if (tfd_isalarm) {
+		if (sched_clock() - tfd_isalarm > 1000000000ULL) {
+			if (tfd_isalarm_cnt > MAX_ALARM_CNT) {
+				pr_info("tfd_isalarm %lld sched_clock %lld tfd_isalarm_cnt %d comm %-15.15s cnt %d\n",
+					tfd_isalarm, sched_clock(),
+					tfd_isalarm_cnt,
+					comm, tfd_isalarm_comm_cnt);
+			}
+			tfd_isalarm = 0;
+			tfd_isalarm_cnt = 0;
+			tfd_isalarm_comm_cnt = 0;
+		}
+	}
+
+	if (duration_us < 1000000ULL / MAX_ALARM_CNT) {
+		struct task_struct *t = current;
+		pid_t pid = t->pid;
+
+		if (!tfd_isalarm) {
+			pr_info("jiffies %lu expire %lld now %lld duration %lld comm %-15.15s cnt %d\n",
+				jiffies, alarm->node.expires, ktime_get(),
+				duration_us, t->comm,
+				tfd_isalarm_comm_cnt);
+				tfd_isalarm = sched_clock();
+		}
+
+		if (!tfd_isalarm_cnt) {
+			strncpy(comm, t->comm, strlen(t->comm));
+			tfd_pid = pid;
+			tfd_isalarm_cnt++;
+		} else if (tfd_isalarm_cnt && (pid == tfd_pid))
+			tfd_isalarm_comm_cnt++;
+
+		tfd_isalarm_cnt++;
+	}
+#endif
 	hrtimer_start(&alarm->timer, alarm->node.expires, HRTIMER_MODE_ABS);
 	spin_unlock_irqrestore(&base->lock, flags);
 
@@ -525,11 +556,35 @@ u64 alarm_forward(struct alarm *alarm, ktime_t now, ktime_t interval)
 }
 EXPORT_SYMBOL_GPL(alarm_forward);
 
-u64 alarm_forward_now(struct alarm *alarm, ktime_t interval)
+static u64 __alarm_forward_now(struct alarm *alarm, ktime_t interval, bool throttle)
 {
 	struct alarm_base *base = &alarm_bases[alarm->type];
+	ktime_t now = base->get_ktime();
 
-	return alarm_forward(alarm, base->get_ktime(), interval);
+	if (IS_ENABLED(CONFIG_HIGH_RES_TIMERS) && throttle) {
+		/*
+		 * Same issue as with posix_timer_fn(). Timers which are
+		 * periodic but the signal is ignored can starve the system
+		 * with a very small interval. The real fix which was
+		 * promised in the context of posix_timer_fn() never
+		 * materialized, but someone should really work on it.
+		 *
+		 * To prevent DOS fake @now to be 1 jiffie out which keeps
+		 * the overrun accounting correct but creates an
+		 * inconsistency vs. timer_gettime(2).
+		 */
+		ktime_t kj = NSEC_PER_SEC / HZ;
+
+		if (interval < kj)
+			now = ktime_add(now, kj);
+	}
+
+	return alarm_forward(alarm, now, interval);
+}
+
+u64 alarm_forward_now(struct alarm *alarm, ktime_t interval)
+{
+	return __alarm_forward_now(alarm, interval, false);
 }
 EXPORT_SYMBOL_GPL(alarm_forward_now);
 
@@ -582,8 +637,11 @@ static enum alarmtimer_type clock2alarm(clockid_t clockid)
 /**
  * alarm_handle_timer - Callback for posix timers
  * @alarm: alarm that fired
+ * @now: time at the timer expiration
  *
  * Posix timer callback for expired alarm timers.
+ *
+ * Return: whether the timer is to be restarted
  */
 static enum alarmtimer_restart alarm_handle_timer(struct alarm *alarm,
 							ktime_t now)
@@ -603,9 +661,10 @@ static enum alarmtimer_restart alarm_handle_timer(struct alarm *alarm,
 	if (posix_timer_event(ptr, si_private) && ptr->it_interval) {
 		/*
 		 * Handle ignored signals and rearm the timer. This will go
-		 * away once we handle ignored signals proper.
+		 * away once we handle ignored signals proper. Ensure that
+		 * small intervals cannot starve the system.
 		 */
-		ptr->it_overrun += alarm_forward_now(alarm, ptr->it_interval);
+		ptr->it_overrun += __alarm_forward_now(alarm, ptr->it_interval, true);
 		++ptr->it_requeue_pending;
 		ptr->it_active = 1;
 		result = ALARMTIMER_RESTART;
@@ -770,8 +829,11 @@ static int alarm_timer_create(struct k_itimer *new_timer)
 /**
  * alarmtimer_nsleep_wakeup - Wakeup function for alarm_timer_nsleep
  * @alarm: ptr to alarm that fired
+ * @now: time at the timer expiration
  *
  * Wakes up the task that set the alarmtimer
+ *
+ * Return: ALARMTIMER_NORESTART
  */
 static enum alarmtimer_restart alarmtimer_nsleep_wakeup(struct alarm *alarm,
 								ktime_t now)
@@ -788,6 +850,7 @@ static enum alarmtimer_restart alarmtimer_nsleep_wakeup(struct alarm *alarm,
  * alarmtimer_do_nsleep - Internal alarmtimer nsleep implementation
  * @alarm: ptr to alarmtimer
  * @absexp: absolute expiration time
+ * @type: alarm type (BOOTTIME/REALTIME).
  *
  * Sets the alarm timer and sleeps until it is fired or interrupted.
  */
@@ -859,9 +922,8 @@ static long __sched alarm_timer_nsleep_restart(struct restart_block *restart)
 /**
  * alarm_timer_nsleep - alarmtimer nanosleep
  * @which_clock: clockid
- * @flags: determins abstime or relative
+ * @flags: determines abstime or relative
  * @tsreq: requested sleep time (abs or rel)
- * @rmtp: remaining sleep time saved
  *
  * Handles clock_nanosleep calls against _ALARM clockids
  */

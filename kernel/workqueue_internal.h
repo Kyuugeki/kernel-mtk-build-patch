@@ -30,7 +30,8 @@ struct worker {
 
 	struct work_struct	*current_work;	/* L: work being processed */
 	work_func_t		current_func;	/* L: current_work's fn */
-	struct pool_workqueue	*current_pwq; /* L: current_work's pwq */
+	struct pool_workqueue	*current_pwq;	/* L: current_work's pwq */
+	unsigned int		current_color;	/* L: current_work's color */
 	struct list_head	scheduled;	/* L: scheduled works */
 
 	/* 64 bytes boundary on 64bit, 32 on 32bit */
@@ -57,6 +58,14 @@ struct worker {
 
 	/* used by the scheduler to determine a worker's last known identity */
 	work_func_t		last_func;
+#if IS_ENABLED(CONFIG_MTK_PANIC_ON_WARN)
+	int			trigger;	/* start accumulate the worker running time */
+	unsigned long		start_run_work;	/* time just b4 process_one_work*/
+	unsigned long		end_run_work;	/* time just finish process_one_work*/
+	unsigned long		wakeup_time;	/* last time the worker wakeup */
+	unsigned long		sleep_time;	/* last time the worker sleep */
+	unsigned long		accumulate_time;/* total running time for each work */
+#endif
 };
 
 /**

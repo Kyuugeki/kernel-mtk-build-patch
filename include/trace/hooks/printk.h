@@ -7,14 +7,11 @@
 #if !defined(_TRACE_HOOK_PRINTK_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_HOOK_PRINTK_H
 
-#include <linux/tracepoint.h>
 #include <trace/hooks/vendor_hooks.h>
 
 DECLARE_HOOK(android_vh_printk_hotplug,
 	TP_PROTO(int *flag),
 	TP_ARGS(flag));
-
-/* macro versions of hooks are no longer required */
 
 #endif /* _TRACE_HOOK_PRINTK_H */
 /* This part must be outside protection */

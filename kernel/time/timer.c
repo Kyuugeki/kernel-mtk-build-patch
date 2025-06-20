@@ -44,6 +44,7 @@
 #include <linux/slab.h>
 #include <linux/compat.h>
 #include <linux/random.h>
+#include <linux/sysctl.h>
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -57,18 +58,9 @@
 #include <trace/events/timer.h>
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/timer.h>
-
 #if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-#include <linux/hrtimer.h>
-#define USLEEP_RANGE_HIS_ARRAY_SIZE (50)
-#define USLEEP_RANGE_HIS_RECORD_CNT (400)
-struct arch_timer_caller_history_struct
-	usleep_range_history[USLEEP_RANGE_HIS_ARRAY_SIZE];
-static uint64_t usleep_range_count;
-static DEFINE_SPINLOCK(usleep_range_lock);
+#include <linux/sched/clock.h>
 #endif
-
-
 EXPORT_TRACEPOINT_SYMBOL_GPL(hrtimer_expire_entry);
 EXPORT_TRACEPOINT_SYMBOL_GPL(hrtimer_expire_exit);
 
@@ -239,7 +231,7 @@ static void timer_update_keys(struct work_struct *work);
 static DECLARE_WORK(timer_update_work, timer_update_keys);
 
 #ifdef CONFIG_SMP
-unsigned int sysctl_timer_migration = 1;
+static unsigned int sysctl_timer_migration = 1;
 
 DEFINE_STATIC_KEY_FALSE(timers_migration_enabled);
 
@@ -250,7 +242,42 @@ static void timers_update_migration(void)
 	else
 		static_branch_disable(&timers_migration_enabled);
 }
-#else
+
+#ifdef CONFIG_SYSCTL
+static int timer_migration_handler(struct ctl_table *table, int write,
+			    void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+
+	mutex_lock(&timer_keys_mutex);
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (!ret && write)
+		timers_update_migration();
+	mutex_unlock(&timer_keys_mutex);
+	return ret;
+}
+
+static struct ctl_table timer_sysctl[] = {
+	{
+		.procname	= "timer_migration",
+		.data		= &sysctl_timer_migration,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= timer_migration_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{}
+};
+
+static int __init timer_sysctl_init(void)
+{
+	register_sysctl("kernel", timer_sysctl);
+	return 0;
+}
+device_initcall(timer_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+#else /* CONFIG_SMP */
 static inline void timers_update_migration(void) { }
 #endif /* !CONFIG_SMP */
 
@@ -265,19 +292,6 @@ static void timer_update_keys(struct work_struct *work)
 void timers_update_nohz(void)
 {
 	schedule_work(&timer_update_work);
-}
-
-int timer_migration_handler(struct ctl_table *table, int write,
-			    void *buffer, size_t *lenp, loff_t *ppos)
-{
-	int ret;
-
-	mutex_lock(&timer_keys_mutex);
-	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
-	if (!ret && write)
-		timers_update_migration();
-	mutex_unlock(&timer_keys_mutex);
-	return ret;
 }
 
 static inline bool is_timers_nohz_active(void)
@@ -519,7 +533,7 @@ static inline unsigned calc_index(unsigned long expires, unsigned lvl,
 	 * Round up with level granularity to prevent this.
 	 */
 	trace_android_vh_timer_calc_index(lvl, &expires);
-	expires = (expires + LVL_GRAN(lvl)) >> LVL_SHIFT(lvl);
+	expires = (expires >> LVL_SHIFT(lvl)) + 1;
 	*bucket_expiry = expires << LVL_SHIFT(lvl);
 	return LVL_OFFS(lvl) + (expires & LVL_MASK);
 }
@@ -632,9 +646,39 @@ static void internal_add_timer(struct timer_base *base, struct timer_list *timer
 
 static const struct debug_obj_descr timer_debug_descr;
 
+struct timer_hint {
+	void	(*function)(struct timer_list *t);
+	long	offset;
+};
+
+#define TIMER_HINT(fn, container, timr, hintfn)			\
+	{							\
+		.function = fn,					\
+		.offset	  = offsetof(container, hintfn) -	\
+			    offsetof(container, timr)		\
+	}
+
+static const struct timer_hint timer_hints[] = {
+	TIMER_HINT(delayed_work_timer_fn,
+		   struct delayed_work, timer, work.func),
+	TIMER_HINT(kthread_delayed_work_timer_fn,
+		   struct kthread_delayed_work, timer, work.func),
+};
+
 static void *timer_debug_hint(void *addr)
 {
-	return ((struct timer_list *) addr)->function;
+	struct timer_list *timer = addr;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(timer_hints); i++) {
+		if (timer_hints[i].function == timer->function) {
+			void (**fn)(void) = addr + timer_hints[i].offset;
+
+			return *fn;
+		}
+	}
+
+	return timer->function;
 }
 
 static bool timer_is_static_object(void *addr)
@@ -913,7 +957,7 @@ static inline void forward_timer_base(struct timer_base *base)
 	/*
 	 * No need to forward if we are close enough below jiffies.
 	 * Also while executing timers, base->clk is 1 offset ahead
-	 * of jiffies to avoid endless requeuing to current jffies.
+	 * of jiffies to avoid endless requeuing to current jiffies.
 	 */
 	if ((long)(jnow - base->clk) < 1)
 		return;
@@ -1276,7 +1320,7 @@ static inline void timer_base_unlock_expiry(struct timer_base *base)
  * The counterpart to del_timer_wait_running().
  *
  * If there is a waiter for base->expiry_lock, then it was waiting for the
- * timer callback to finish. Drop expiry_lock and reaquire it. That allows
+ * timer callback to finish. Drop expiry_lock and reacquire it. That allows
  * the waiter to acquire the lock and make progress.
  */
 static void timer_sync_wait_running(struct timer_base *base)
@@ -1304,7 +1348,7 @@ static void del_timer_wait_running(struct timer_list *timer)
 	u32 tf;
 
 	tf = READ_ONCE(timer->flags);
-	if (!(tf & TIMER_MIGRATING)) {
+	if (!(tf & (TIMER_MIGRATING | TIMER_IRQSAFE))) {
 		struct timer_base *base = get_timer_base(tf);
 
 		/*
@@ -1387,6 +1431,13 @@ int del_timer_sync(struct timer_list *timer)
 	 * could lead to deadlock.
 	 */
 	WARN_ON(in_irq() && !(timer->flags & TIMER_IRQSAFE));
+
+	/*
+	 * Must be able to sleep on PREEMPT_RT because of the slowpath in
+	 * del_timer_wait_running().
+	 */
+	if (IS_ENABLED(CONFIG_PREEMPT_RT) && !(timer->flags & TIMER_IRQSAFE))
+		lockdep_assert_preemption_enabled();
 
 	do {
 		ret = try_to_del_timer_sync(timer);
@@ -1713,42 +1764,6 @@ void timer_clear_idle(void)
 }
 #endif
 
-/*
- * Called from the timer interrupt handler to charge one tick to the current
- * process.  user_tick is 1 if the tick is user time, 0 for system.
- */
-void update_process_times(int user_tick)
-{
-	struct task_struct *p = current;
-#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-	u64 start, end, process_time;
-#endif
-
-	PRANDOM_ADD_NOISE(jiffies, user_tick, p, 0);
-
-	/* Note: this timer irq context must be accounted for as well. */
-	account_process_tick(p, user_tick);
-	run_local_timers();
-	rcu_sched_clock_irq(user_tick);
-#ifdef CONFIG_IRQ_WORK
-	if (in_irq())
-		irq_work_tick();
-#endif
-#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-	start = sched_clock();
-#endif
-	scheduler_tick();
-#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-	end = sched_clock();
-	process_time = end - start;
-	if (process_time > 5000000L) // > 5ms
-		pr_notice("irq_monitor: time: %lld func: %s line: %d "
-			, process_time, __func__, __LINE__);
-#endif
-	if (IS_ENABLED(CONFIG_POSIX_TIMERS))
-		run_posix_cpu_timers();
-}
-
 /**
  * __run_timers - run all expired timers (if any) on this CPU.
  * @base: the timer vector to be processed.
@@ -1801,7 +1816,7 @@ static __latent_entropy void run_timer_softirq(struct softirq_action *h)
 /*
  * Called by the local, per-CPU timer interrupt on SMP.
  */
-void run_local_timers(void)
+static void run_local_timers(void)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
 
@@ -1816,6 +1831,40 @@ void run_local_timers(void)
 			return;
 	}
 	raise_softirq(TIMER_SOFTIRQ);
+}
+
+/*
+ * Called from the timer interrupt handler to charge one tick to the current
+ * process.  user_tick is 1 if the tick is user time, 0 for system.
+ */
+void update_process_times(int user_tick)
+{
+	struct task_struct *p = current;
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	u64 start, end, process_time;
+#endif
+
+	/* Note: this timer irq context must be accounted for as well. */
+	account_process_tick(p, user_tick);
+	run_local_timers();
+	rcu_sched_clock_irq(user_tick);
+#ifdef CONFIG_IRQ_WORK
+	if (in_irq())
+		irq_work_tick();
+#endif
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	start = sched_clock();
+#endif
+	scheduler_tick();
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	end = sched_clock();
+	process_time = end - start;
+	if (process_time > 5000000L) // > 5ms
+		pr_notice("irq_monitor: time: %lld func: %s line: %d "
+			, process_time, __func__, __LINE__);
+#endif
+	if (IS_ENABLED(CONFIG_POSIX_TIMERS))
+		run_posix_cpu_timers();
 }
 
 /*
@@ -1894,7 +1943,7 @@ signed long __sched schedule_timeout(signed long timeout)
 			printk(KERN_ERR "schedule_timeout: wrong timeout "
 				"value %lx\n", timeout);
 			dump_stack();
-			current->state = TASK_RUNNING;
+			__set_current_state(TASK_RUNNING);
 			goto out;
 		}
 	}
@@ -1976,6 +2025,7 @@ int timers_prepare_cpu(unsigned int cpu)
 		base = per_cpu_ptr(&timer_bases[b], cpu);
 		base->clk = jiffies;
 		base->next_expiry = base->clk + NEXT_TIMER_MAX_DELTA;
+		base->next_expiry_recalc = false;
 		base->timers_pending = false;
 		base->is_idle = false;
 	}
@@ -2096,19 +2146,6 @@ void __sched usleep_range_state(unsigned long min, unsigned long max,
 {
 	ktime_t exp = ktime_add_us(ktime_get(), min);
 	u64 delta = (u64)(max - min) * NSEC_PER_USEC;
-#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-	u64 temp_count = 0;
-	unsigned long flags = 0;
-
-	spin_lock_irqsave(&usleep_range_lock, flags);
-	usleep_range_count++;
-	if ((usleep_range_count % USLEEP_RANGE_HIS_RECORD_CNT) == 0)
-		temp_count = usleep_range_count / USLEEP_RANGE_HIS_RECORD_CNT;
-	temp_count = temp_count % USLEEP_RANGE_HIS_ARRAY_SIZE;
-	usleep_range_history[temp_count].timer_caller_ip = CALLER_ADDR0;
-	usleep_range_history[temp_count].timer_called = sched_clock();
-	spin_unlock_irqrestore(&usleep_range_lock, flags);
-#endif
 
 	for (;;) {
 		__set_current_state(state);
@@ -2117,36 +2154,4 @@ void __sched usleep_range_state(unsigned long min, unsigned long max,
 			break;
 	}
 }
-
-/**
- * usleep_range - Sleep for an approximate time
- * @min: Minimum time in usecs to sleep
- * @max: Maximum time in usecs to sleep
- *
- * In non-atomic context where the exact wakeup time is flexible, use
- * usleep_range() instead of udelay().  The sleep improves responsiveness
- * by avoiding the CPU-hogging busy-wait of udelay(), and the range reduces
- * power usage by allowing hrtimers to take advantage of an already-
- * scheduled interrupt instead of scheduling a new one just for this sleep.
- */
-void __sched usleep_range(unsigned long min, unsigned long max)
-{
-	usleep_range_state(min, max, TASK_UNINTERRUPTIBLE);
-}
-EXPORT_SYMBOL(usleep_range);
-
-#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-void dump_arch_timer_burst_history(void)
-{
-	int i;
-	unsigned long flags = 0;
-
-	spin_lock_irqsave(&usleep_range_lock, flags);
-	for (i = 0; i < USLEEP_RANGE_HIS_ARRAY_SIZE; i++)
-		pr_info("usleep_range_history[%d].caller %pS, call time: %lld",
-			i, usleep_range_history[i].timer_caller_ip,
-			usleep_range_history[i].timer_called);
-	spin_unlock_irqrestore(&usleep_range_lock, flags);
-}
-EXPORT_SYMBOL(dump_arch_timer_burst_history);
-#endif
+EXPORT_SYMBOL(usleep_range_state);

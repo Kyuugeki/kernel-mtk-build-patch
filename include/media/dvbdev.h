@@ -190,6 +190,21 @@ struct dvb_device {
 };
 
 /**
+ * struct dvbdevfops_node - fops nodes registered in dvbdevfops_list
+ *
+ * @fops:		Dynamically allocated fops for ->owner registration
+ * @type:		type of dvb_device
+ * @template:		dvb_device used for registration
+ * @list_head:		list_head for dvbdevfops_list
+ */
+struct dvbdevfops_node {
+	struct file_operations *fops;
+	enum dvb_device_type type;
+	const struct dvb_device *template;
+	struct list_head list_head;
+};
+
+/**
  * dvb_device_get - Increase dvb_device reference
  *
  * @dvbdev:	pointer to struct dvb_device
@@ -325,7 +340,7 @@ int dvb_create_media_graph(struct dvb_adapter *adap,
 int dvb_generic_open(struct inode *inode, struct file *file);
 
 /**
- * dvb_generic_close - Digital TV close function, used by DVB devices
+ * dvb_generic_release - Digital TV close function, used by DVB devices
  *
  * @inode: pointer to &struct inode.
  * @file: pointer to &struct file.
@@ -425,7 +440,7 @@ void dvb_module_release(struct i2c_client *client);
  * dvb_attach - attaches a DVB frontend into the DVB core.
  *
  * @FUNCTION:	function on a frontend module to be called.
- * @ARGS...:	@FUNCTION arguments.
+ * @ARGS:	@FUNCTION arguments.
  *
  * This ancillary function loads a frontend module in runtime and runs
  * the @FUNCTION function there, with @ARGS.

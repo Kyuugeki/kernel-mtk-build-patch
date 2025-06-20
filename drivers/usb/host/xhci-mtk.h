@@ -9,9 +9,14 @@
 #ifndef _XHCI_MTK_H_
 #define _XHCI_MTK_H_
 
+#include <linux/clk.h>
 #include <linux/hashtable.h>
+#include <linux/regulator/consumer.h>
 
 #include "xhci.h"
+
+#define BULK_CLKS_NUM	5
+#define BULK_VREGS_NUM	2
 
 /* support at most 64 ep, use 32 size hash table */
 #define SCH_EP_HASH_BITS	5
@@ -78,7 +83,6 @@ struct mu3h_sch_bw_info {
  *		times; 1: distribute the (bMaxBurst+1)*(Mult+1) packets
  *		according to @pkts and @repeat. normal mode is used by
  *		default
- * @bw_budget_table: table to record bandwidth budget per microframe
  */
 struct mu3h_sch_ep_info {
 	u32 esit;
@@ -104,7 +108,6 @@ struct mu3h_sch_ep_info {
 	u32 pkts;
 	u32 cs_count;
 	u32 burst_mode;
-	u32 bw_budget_table[];
 };
 
 #define MU3C_U3_PORT_MAX 4
@@ -143,30 +146,22 @@ struct xhci_hcd_mtk {
 	struct list_head bw_ep_chk_list;
 	DECLARE_HASHTABLE(sch_ep_hash, SCH_EP_HASH_BITS);
 	struct mu3c_ippc_regs __iomem *ippc_regs;
-	bool has_ippc;
 	int num_u2_ports;
 	int num_u3_ports;
+	int u2p_dis_msk;
 	int u3p_dis_msk;
-	struct regulator *vusb33;
-	struct regulator *vbus;
-	struct clk *sys_clk;	/* sys and mac clock */
-	struct clk *xhci_clk;
-	struct clk *ref_clk;
-	struct clk *mcu_clk;
-	struct clk *dma_clk;
-	struct regmap *pericfg;
-	struct phy **phys;
-	int num_phys;
-	bool lpm_support;
-	bool u2_lpm_disable;
+	struct clk_bulk_data clks[BULK_CLKS_NUM];
+	struct regulator_bulk_data supplies[BULK_VREGS_NUM];
+	unsigned int has_ippc:1;
+	unsigned int lpm_support:1;
+	unsigned int u2_lpm_disable:1;
 	/* usb remote wakeup */
-	bool uwk_en;
+	unsigned int uwk_en:1;
 	struct regmap *uwk;
 	u32 uwk_reg_base;
 	u32 uwk_vers;
-	bool keep_clk_on;
-	struct proc_dir_entry *root;
-	struct proc_dir_entry *testmode_file;
+	/* quirk */
+	u32 rxfifo_depth;
 };
 
 static inline struct xhci_hcd_mtk *hcd_to_mtk(struct usb_hcd *hcd)

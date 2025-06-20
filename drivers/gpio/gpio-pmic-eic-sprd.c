@@ -331,13 +331,13 @@ static int sprd_pmic_eic_probe(struct platform_device *pdev)
 	pmic_eic->chip.ngpio = SPRD_PMIC_EIC_NR;
 	pmic_eic->chip.base = -1;
 	pmic_eic->chip.parent = &pdev->dev;
-	pmic_eic->chip.of_node = pdev->dev.of_node;
 	pmic_eic->chip.direction_input = sprd_pmic_eic_direction_input;
 	pmic_eic->chip.request = sprd_pmic_eic_request;
 	pmic_eic->chip.free = sprd_pmic_eic_free;
 	pmic_eic->chip.set_config = sprd_pmic_eic_set_config;
 	pmic_eic->chip.set = sprd_pmic_eic_set;
 	pmic_eic->chip.get = sprd_pmic_eic_get;
+	pmic_eic->chip.can_sleep = true;
 
 	pmic_eic->intc.name = dev_name(&pdev->dev);
 	pmic_eic->intc.irq_mask = sprd_pmic_eic_irq_mask;

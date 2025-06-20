@@ -56,8 +56,8 @@
 static int led_type __read_mostly = -1;
 static unsigned char lastleds;	/* LED state from most recent update */
 static unsigned int led_heartbeat __read_mostly = 1;
-static unsigned int led_diskio    __read_mostly = 1;
-static unsigned int led_lanrxtx   __read_mostly = 1;
+static unsigned int led_diskio    __read_mostly;
+static unsigned int led_lanrxtx   __read_mostly;
 static char lcd_text[32]          __read_mostly;
 static char lcd_text_default[32]  __read_mostly;
 static int  lcd_no_led_support    __read_mostly = 0; /* KittyHawk doesn't support LED on its LCD */
@@ -171,14 +171,14 @@ static int led_proc_show(struct seq_file *m, void *v)
 
 static int led_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, led_proc_show, PDE_DATA(inode));
+	return single_open(file, led_proc_show, pde_data(inode));
 }
 
 
 static ssize_t led_proc_write(struct file *file, const char __user *buf,
 	size_t count, loff_t *pos)
 {
-	void *data = PDE_DATA(file_inode(file));
+	void *data = pde_data(file_inode(file));
 	char *cur, lbuf[32];
 	int d;
 
@@ -253,14 +253,14 @@ static int __init led_create_procfs(void)
 
 	if (!lcd_no_led_support)
 	{
-		ent = proc_create_data("led", S_IRUGO|S_IWUSR, proc_pdc_root,
+		ent = proc_create_data("led", 0644, proc_pdc_root,
 					&led_proc_ops, (void *)LED_NOLCD); /* LED */
 		if (!ent) return -1;
 	}
 
 	if (led_type == LED_HASLCD)
 	{
-		ent = proc_create_data("lcd", S_IRUGO|S_IWUSR, proc_pdc_root,
+		ent = proc_create_data("lcd", 0644, proc_pdc_root,
 					&led_proc_ops, (void *)LED_HASLCD); /* LCD */
 		if (!ent) return -1;
 	}
@@ -649,7 +649,7 @@ int lcd_print( const char *str )
 		cancel_delayed_work_sync(&led_task);
 
 	/* copy display string to buffer for procfs */
-	strlcpy(lcd_text, str, sizeof(lcd_text));
+	strscpy(lcd_text, str, sizeof(lcd_text));
 
 	/* Set LCD Cursor to 1st character */
 	gsc_writeb(lcd_info.reset_cmd1, LCD_CMD_REG);

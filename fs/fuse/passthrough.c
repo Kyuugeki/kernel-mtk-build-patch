@@ -2,6 +2,7 @@
 
 #include "fuse_i.h"
 
+#include <linux/file.h>
 #include <linux/fuse.h>
 #include <linux/idr.h>
 #include <linux/uio.h>
@@ -34,7 +35,7 @@ static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 	touch_atime(&dst_file->f_path);
 }
 
-static void fuse_copyattr(struct file *dst_file, struct file *src_file)
+void fuse_copyattr(struct file *dst_file, struct file *src_file)
 {
 	struct inode *dst = file_inode(dst_file);
 	struct inode *src = file_inode(src_file);
@@ -61,14 +62,14 @@ static void fuse_aio_cleanup_handler(struct fuse_aio_req *aio_req)
 	kfree(aio_req);
 }
 
-static void fuse_aio_rw_complete(struct kiocb *iocb, long res, long res2)
+static void fuse_aio_rw_complete(struct kiocb *iocb, long res)
 {
 	struct fuse_aio_req *aio_req =
 		container_of(iocb, struct fuse_aio_req, iocb);
 	struct kiocb *iocb_fuse = aio_req->iocb_fuse;
 
 	fuse_aio_cleanup_handler(aio_req);
-	iocb_fuse->ki_complete(iocb_fuse, res, res2);
+	iocb_fuse->ki_complete(iocb_fuse, res);
 }
 
 ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
@@ -213,7 +214,8 @@ int fuse_passthrough_open(struct fuse_dev *fud, u32 lower_fd)
 	}
 
 	if (!passthrough_filp->f_op->read_iter ||
-	    !passthrough_filp->f_op->write_iter) {
+	    !((passthrough_filp->f_path.mnt->mnt_flags | MNT_READONLY) ||
+	       passthrough_filp->f_op->write_iter)) {
 		pr_err("FUSE: passthrough file misses file operations.\n");
 		res = -EBADF;
 		goto err_free_file;

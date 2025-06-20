@@ -352,10 +352,11 @@ hrtimer_expires_remaining_adjusted(const struct hrtimer *timer)
 
 #ifdef CONFIG_TIMERFD
 extern void timerfd_clock_was_set(void);
+extern void timerfd_resume(void);
 #else
 static inline void timerfd_clock_was_set(void) { }
+static inline void timerfd_resume(void) { }
 #endif
-extern void hrtimers_resume(void);
 
 DECLARE_PER_CPU(struct tick_device, tick_cpu_device);
 
@@ -445,6 +446,10 @@ static inline void hrtimer_restart(struct hrtimer *timer)
 /* Query timers: */
 extern ktime_t __hrtimer_get_remaining(const struct hrtimer *timer, bool adjust);
 
+/**
+ * hrtimer_get_remaining - get remaining time for the timer
+ * @timer:	the timer to read
+ */
 static inline ktime_t hrtimer_get_remaining(const struct hrtimer *timer)
 {
 	return __hrtimer_get_remaining(timer, false);
@@ -456,7 +461,7 @@ extern u64 hrtimer_next_event_without(const struct hrtimer *exclude);
 extern bool hrtimer_active(const struct hrtimer *timer);
 
 /**
- * hrtimer_is_queued = check, whether the timer is on one of the queues
+ * hrtimer_is_queued - check, whether the timer is on one of the queues
  * @timer:	Timer to check
  *
  * Returns: True if the timer is queued, false otherwise
@@ -532,39 +537,6 @@ int hrtimers_prepare_cpu(unsigned int cpu);
 int hrtimers_dead_cpu(unsigned int cpu);
 #else
 #define hrtimers_dead_cpu	NULL
-#endif
-
-#if IS_ENABLED(CONFIG_MTK_TICK_BROADCAST_DEBUG)
-struct tick_broadcast_history_struct {
-	unsigned long long time_enter;
-	unsigned long long time_exit;
-	int ret_enter;
-	int affin_enter_cpu;
-	int affin_handle_cpu;
-	unsigned long long handle_time;
-};
-
-extern struct tick_broadcast_history_struct tick_broadcast_history[NR_CPUS];
-
-#define BC_LOG_BUF_LEN         1024
-struct tick_broadcast_dump_buf {
-	char buf[BC_LOG_BUF_LEN];
-	char *p_idx;
-};
-
-extern struct tick_broadcast_dump_buf bc_dump_buf;
-extern struct cpumask *bc_tick_get_broadcast_oneshot_mask(void);
-extern struct cpumask *bc_tick_get_broadcast_pending_mask(void);
-extern struct cpumask *bc_tick_get_broadcast_force_mask(void);
-#endif
-
-
-#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
-struct arch_timer_caller_history_struct {
-	unsigned long timer_caller_ip;
-	u64 timer_called;
-};
-extern void dump_arch_timer_burst_history(void);
 #endif
 
 #endif

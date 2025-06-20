@@ -13,12 +13,18 @@
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
 
+#if IS_ENABLED(CONFIG_MTK_FUSE_DEBUG)
+#include <trace/events/mtk_fuse.h>
+#endif
+
 static bool fuse_use_readdirplus(struct inode *dir, struct dir_context *ctx)
 {
 	struct fuse_conn *fc = get_fuse_conn(dir);
 	struct fuse_inode *fi = get_fuse_inode(dir);
 
 	if (!fc->do_readdirplus)
+		return false;
+	if (fi->nodeid == 0)
 		return false;
 	if (!fc->readdirplus_auto)
 		return true;
@@ -76,13 +82,13 @@ static void fuse_add_dirent_to_cache(struct file *file,
 	    WARN_ON(fi->rdc.pos != pos))
 		goto unlock;
 
-	addr = kmap_atomic(page);
+	addr = kmap_local_page(page);
 	if (!offset) {
 		clear_page(addr);
 		SetPageUptodate(page);
 	}
 	memcpy(addr + offset, dirent, reclen);
-	kunmap_atomic(addr);
+	kunmap_local(addr);
 	fi->rdc.size = (index << PAGE_SHIFT) + offset + reclen;
 	fi->rdc.pos = dirent->off;
 unlock:
@@ -219,6 +225,10 @@ retry:
 
 		fi = get_fuse_inode(inode);
 		spin_lock(&fi->lock);
+#if IS_ENABLED(CONFIG_MTK_FUSE_DEBUG)
+		trace_mtk_fuse_nlookup(__func__, __LINE__, inode,
+				fi->nodeid, fi->nlookup, fi->nlookup + 1);
+#endif
 		fi->nlookup++;
 		spin_unlock(&fi->lock);
 
@@ -243,8 +253,16 @@ retry:
 			dput(dentry);
 			dentry = alias;
 		}
-		if (IS_ERR(dentry))
+		if (IS_ERR(dentry)) {
+			if (!IS_ERR(inode)) {
+				struct fuse_inode *fi = get_fuse_inode(inode);
+
+				spin_lock(&fi->lock);
+				fi->nlookup--;
+				spin_unlock(&fi->lock);
+			}
 			return PTR_ERR(dentry);
+		}
 	}
 	if (fc->readdirplus_auto)
 		set_bit(FUSE_I_INIT_RDPLUS, &get_fuse_inode(inode)->state);
@@ -260,6 +278,10 @@ static void fuse_force_forget(struct file *file, u64 nodeid)
 	struct fuse_mount *fm = get_fuse_mount(inode);
 	struct fuse_forget_in inarg;
 	FUSE_ARGS(args);
+
+#if IS_ENABLED(CONFIG_MTK_FUSE_DEBUG)
+	trace_mtk_fuse_force_forget(__func__, __LINE__, inode, nodeid, 1);
+#endif
 
 	memset(&inarg, 0, sizeof(inarg));
 	inarg.nlookup = 1;
@@ -456,7 +478,7 @@ static int fuse_readdir_cached(struct file *file, struct dir_context *ctx)
 	 * cache; both cases require an up-to-date mtime value.
 	 */
 	if (!ctx->pos && fc->auto_inval_data) {
-		int err = fuse_update_attributes(inode, file);
+		int err = fuse_update_attributes(inode, file, STATX_MTIME);
 
 		if (err)
 			return err;
@@ -578,6 +600,26 @@ int fuse_readdir(struct file *file, struct dir_context *ctx)
 	struct fuse_file *ff = file->private_data;
 	struct inode *inode = file_inode(file);
 	int err;
+
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_err_ret fer;
+	bool allow_force;
+	bool force_again = false;
+	bool is_continued = false;
+
+again:
+	fer = fuse_bpf_backing(inode, struct fuse_read_io,
+			       fuse_readdir_initialize, fuse_readdir_backing,
+			       fuse_readdir_finalize,
+			       file, ctx, &force_again, &allow_force, is_continued);
+	if (force_again && !IS_ERR(fer.result)) {
+		is_continued = true;
+		goto again;
+	}
+
+	if (fer.ret)
+		return PTR_ERR(fer.result);
+#endif
 
 	if (fuse_is_bad(inode))
 		return -EIO;

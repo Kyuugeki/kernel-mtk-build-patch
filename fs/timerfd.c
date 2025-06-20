@@ -27,6 +27,11 @@
 #include <linux/compat.h>
 #include <linux/rcupdate.h>
 #include <linux/time_namespace.h>
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+#include <linux/sched/clock.h>
+#include <linux/sched.h>
+#define MAX_NORMAL_CNT	10000ULL
+#endif
 
 #include <trace/hooks/fs.h>
 
@@ -117,6 +122,22 @@ void timerfd_clock_was_set(void)
 	rcu_read_unlock();
 }
 
+static void timerfd_resume_work(struct work_struct *work)
+{
+	timerfd_clock_was_set();
+}
+
+static DECLARE_WORK(timerfd_work, timerfd_resume_work);
+
+/*
+ * Invoked from timekeeping_resume(). Defer the actual update to work so
+ * timerfd_clock_was_set() runs in task context.
+ */
+void timerfd_resume(void)
+{
+	schedule_work(&timerfd_work);
+}
+
 static void __timerfd_remove_cancel(struct timerfd_ctx *ctx)
 {
 	if (ctx->might_cancel) {
@@ -178,6 +199,14 @@ static int timerfd_setup(struct timerfd_ctx *ctx, int flags,
 	enum hrtimer_mode htmode;
 	ktime_t texp;
 	int clockid = ctx->clockid;
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	static unsigned long long duration_us;
+	static unsigned long long tfd_normal;
+	static int tfd_normal_cnt;
+	static int tfd_normal_comm_cnt;
+	static char comm[TASK_COMM_LEN];
+	static pid_t tfd_pid;
+#endif
 
 	htmode = (flags & TFD_TIMER_ABSTIME) ?
 		HRTIMER_MODE_ABS: HRTIMER_MODE_REL;
@@ -207,6 +236,50 @@ static int timerfd_setup(struct timerfd_ctx *ctx, int flags,
 			else
 				alarm_start_relative(&ctx->t.alarm, texp);
 		} else {
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+			/* warn_on when timeout is less than 50us */
+			if (htmode & HRTIMER_MODE_REL)
+				duration_us = ktime_to_ns(texp) / 1000;
+			else
+				duration_us = ktime_us_delta(texp, ktime_get());
+
+			if (tfd_normal) {
+				if (sched_clock() - tfd_normal > 1000000000ULL) {
+					if (tfd_normal_cnt > MAX_NORMAL_CNT) {
+						pr_info("tfd_normal %lld sched_clock %lld tfd_normal_cnt %d comm %-15.15s cnt %d\n",
+							tfd_normal, sched_clock(),
+							tfd_normal_cnt, comm,
+							tfd_normal_comm_cnt);
+					}
+
+					tfd_normal = 0;
+					tfd_normal_cnt = 0;
+					tfd_normal_comm_cnt = 0;
+				}
+			}
+
+			if (duration_us < 1000000ULL / MAX_NORMAL_CNT) {
+				struct task_struct *t = current;
+				pid_t pid = t->pid;
+
+				if (!tfd_normal) {
+					tfd_normal = sched_clock();
+					pr_info("MODE:%d jiffies %lu expire %lld now %lld duration %lld comm %-15.15s cnt %d\n",
+						htmode, jiffies, texp, ktime_get(),
+						duration_us, t->comm,
+						tfd_normal_comm_cnt);
+				}
+
+				if (!tfd_normal_cnt) {
+					strncpy(comm, t->comm, strlen(t->comm));
+					tfd_pid = pid;
+					tfd_normal_cnt++;
+				} else if (tfd_normal_cnt && (pid == tfd_pid))
+					tfd_normal_comm_cnt++;
+
+				tfd_normal_cnt++;
+			}
+#endif
 			hrtimer_start(&ctx->t.tmr, texp, htmode);
 		}
 

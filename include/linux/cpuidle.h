@@ -50,8 +50,8 @@ struct cpuidle_state {
 	char		name[CPUIDLE_NAME_LEN];
 	char		desc[CPUIDLE_DESC_LEN];
 
-	u64		exit_latency_ns;
-	u64		target_residency_ns;
+	s64		exit_latency_ns;
+	s64		target_residency_ns;
 	unsigned int	flags;
 	unsigned int	exit_latency; /* in US */
 	int		power_usage; /* in mW */
@@ -313,5 +313,13 @@ extern s64 cpuidle_governor_latency_req(unsigned int cpu);
 
 #define CPU_PM_CPU_IDLE_ENTER_RETENTION_PARAM(low_level_idle_enter, idx, state)	\
 	__CPU_PM_CPU_IDLE_ENTER(low_level_idle_enter, idx, state, 1)
+
+#ifdef CONFIG_CPU_IDLE_GOV_TEO
+unsigned long teo_cpu_get_util_threshold(int cpu);
+void teo_cpu_set_util_threshold(int cpu, unsigned long util);
+#else
+static inline unsigned long teo_cpu_get_util_threshold(int cpu) {return -1;}
+static inline void teo_cpu_set_util_threshold(int cpu, unsigned long util) {}
+#endif
 
 #endif /* _LINUX_CPUIDLE_H */

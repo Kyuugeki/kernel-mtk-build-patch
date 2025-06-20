@@ -13,11 +13,43 @@
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
 
-#include <trace/hooks/dmabuf.h>
-
 #include "dma-buf-sysfs-stats.h"
 
 #define to_dma_buf_entry_from_kobj(x) container_of(x, struct dma_buf_sysfs_entry, kobj)
+
+/**
+ * DOC: overview
+ *
+ * ``/sys/kernel/debug/dma_buf/bufinfo`` provides an overview of every DMA-BUF
+ * in the system. However, since debugfs is not safe to be mounted in
+ * production, procfs and sysfs can be used to gather DMA-BUF statistics on
+ * production systems.
+ *
+ * The ``/proc/<pid>/fdinfo/<fd>`` files in procfs can be used to gather
+ * information about DMA-BUF fds. Detailed documentation about the interface
+ * is present in Documentation/filesystems/proc.rst.
+ *
+ * Unfortunately, the existing procfs interfaces can only provide information
+ * about the DMA-BUFs for which processes hold fds or have the buffers mmapped
+ * into their address space. This necessitated the creation of the DMA-BUF sysfs
+ * statistics interface to provide per-buffer information on production systems.
+ *
+ * The interface at ``/sys/kernel/dma-buf/buffers`` exposes information about
+ * every DMA-BUF when ``CONFIG_DMABUF_SYSFS_STATS`` is enabled.
+ *
+ * The following stats are exposed by the interface:
+ *
+ * * ``/sys/kernel/dmabuf/buffers/<inode_number>/exporter_name``
+ * * ``/sys/kernel/dmabuf/buffers/<inode_number>/size``
+ *
+ * The information in the interface can also be used to derive per-exporter
+ * statistics. The data from the interface can be gathered on error conditions
+ * or other important events to provide a snapshot of DMA-BUF usage.
+ * It can also be collected periodically by telemetry to monitor various metrics.
+ *
+ * Detailed documentation about the interface is present in
+ * Documentation/ABI/testing/sysfs-kernel-dmabuf-buffers.
+ */
 
 struct dma_buf_stats_attribute {
 	struct attribute attr;
@@ -90,23 +122,18 @@ static struct kobj_type dma_buf_ktype = {
 void dma_buf_stats_teardown(struct dma_buf *dmabuf)
 {
 	struct dma_buf_sysfs_entry *sysfs_entry;
-	bool skip_sysfs_release = false;
 
 	sysfs_entry = dmabuf->sysfs_entry;
 	if (!sysfs_entry)
 		return;
 
-	trace_android_rvh_dma_buf_stats_teardown(sysfs_entry, &skip_sysfs_release);
-	if (!skip_sysfs_release) {
-		kobject_del(&sysfs_entry->kobj);
-		kobject_put(&sysfs_entry->kobj);
-	}
+	kobject_del(&sysfs_entry->kobj);
+	kobject_put(&sysfs_entry->kobj);
 }
 
-/*
- * Statistics files do not need to send uevents.
- */
-static int dmabuf_sysfs_uevent_filter(struct kset *kset, struct kobject *kobj)
+
+/* Statistics files do not need to send uevents. */
+static int dmabuf_sysfs_uevent_filter(struct kobject *kobj)
 {
 	return 0;
 }
@@ -170,7 +197,7 @@ static void sysfs_add_workfn(struct work_struct *work)
 		dmabuf->sysfs_entry->dmabuf = dmabuf;
 		/*
 		 * kobject_init_and_add expects kobject to be zero-filled, but we have populated it
-		 * to trigger this work function.
+		 * (the sysfs_add_work union member) to trigger this work function.
 		 */
 		memset(&dmabuf->sysfs_entry->kobj, 0, sizeof(dmabuf->sysfs_entry->kobj));
 		dmabuf->sysfs_entry->kobj.kset = dma_buf_per_buffer_stats_kset;
@@ -190,13 +217,10 @@ static void sysfs_add_workfn(struct work_struct *work)
 	dma_buf_put(dmabuf);
 }
 
-int dma_buf_stats_setup(struct dma_buf *dmabuf)
+int dma_buf_stats_setup(struct dma_buf *dmabuf, struct file *file)
 {
 	struct dma_buf_create_sysfs_entry *create_entry;
 	union dma_buf_create_sysfs_work_entry *work_entry;
-
-	if (!dmabuf || !dmabuf->file)
-		return -EINVAL;
 
 	if (!dmabuf->exp_name) {
 		pr_err("exporter name must not be empty if stats needed\n");
